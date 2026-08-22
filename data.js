@@ -2,6 +2,7 @@
    t: 目標レップ / e: 片側(each) / s: マシン設定(椅子高さ等) / v: 動画撮影推奨
    seed: [前回, 前々回] の記録 [重量, レップ]  ("105+5" のような足し算表記OK)
    a: フォーム解析の種目タイプ
+   sets: 既定のセット数（未指定は2）
    alts: 代替種目
 */
 const ex = (id, name, o = {}) => ({
@@ -11,6 +12,7 @@ const ex = (id, name, o = {}) => ({
   setting: o.s || '',
   video: !!o.v,
   bw: !!o.bw,
+  sets: o.sets ?? 2,
   analyze: o.a || '',
   note: o.note || '',
   seed: o.seed || [],
@@ -38,7 +40,7 @@ const PROGRAM = [
       ex('dips', 'Dips', { t: 6, note: '加重', seed: [['32.5', '7'], ['32.5', '']] }),
       ex('preachercurl', 'Preacher Curl', { t: 8, seed: [['22.5', '7'], ['22.5', '5']],
         alts: [ex('dbpreachercurl', 'DB Preacher Curl', { e: 1, t: 6, seed: [['16', '6'], ['14', '8']] })] }),
-      ex('abroller1', 'Ab Roller', { bw: 1, t: 0 })
+      ex('abroller1', 'Ab Roller', { bw: 1, t: 0, sets: 1 })
     ]
   },
   {
@@ -75,7 +77,7 @@ const PROGRAM = [
           ex('tbarrow', 'T-Bar Row', { t: 6, a: 'scap', seed: [['77.5', '8'], ['77.5', '7']] }),
           ex('supportedbor', 'Supported BOR', { t: 6, a: 'scap', seed: [['82.5', '6'], ['77.5', '6']] })
         ] }),
-      ex('abroller3', 'Ab Roller', { bw: 1, t: 0 }),
+      ex('abroller3', 'Ab Roller', { bw: 1, t: 0, sets: 1 }),
       ex('bbarmcurl', 'BB Arm Curl', { t: 8, seed: [['35', '9'], ['35', '']],
         alts: [ex('cablearmcurl', 'Cable Arm Curl', { t: 6, seed: [['64', '8'], ['64', '6']] })] }),
       ex('tripushdown', 'Tri Push Down', { t: 8, seed: [['64', '12'], ['68', '11']],

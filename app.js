@@ -21,9 +21,11 @@ function defaults() {
     body: [],
     sessions: [],
     meals: {},
+    names: {},
     tab: 'workout',
     day: 'day1',
-    mealDate: null
+    mealDate: null,
+    logDate: null
   };
 }
 
@@ -80,12 +82,15 @@ function toast(msg) {
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 /* ============ セッション ============ */
+const logDate = () => S.logDate || today();
+const exName = it => S.names[it.id] || it.name;
+
 function currentSession(dayId) {
-  return S.sessions.find(s => s.date === today() && s.day === dayId && !s.done);
+  return S.sessions.find(s => s.date === logDate() && s.day === dayId && !s.done);
 }
 function openSession(dayId) {
   let s = currentSession(dayId);
-  if (!s) { s = { id: uid(), date: today(), day: dayId, logs: {}, done: false }; S.sessions.push(s); save(); }
+  if (!s) { s = { id: uid(), date: logDate(), day: dayId, logs: {}, done: false }; S.sessions.push(s); save(); }
   return s;
 }
 function prevRecords(exId, excludeId) {
@@ -185,22 +190,31 @@ document.getElementById('tabbar').addEventListener('click', e => {
 /* ============ 筋トレ ============ */
 function viewWorkout(el) {
   const day = PROGRAM.find(d => d.id === S.day) || PROGRAM[0];
+  const d0 = logDate();
   const sess = currentSession(day.id);
-  const doneToday = S.sessions.find(s => s.date === today() && s.day === day.id && s.done);
+  const doneToday = S.sessions.find(s => s.date === d0 && s.day === day.id && s.done);
   document.getElementById('bar-title').textContent = day.name;
+  document.getElementById('bar-right').innerHTML = '';
 
   el.innerHTML = `
     <div class="seg">${PROGRAM.map(d => `<button data-d="${d.id}" class="${d.id === day.id ? 'on' : ''}">${d.name.replace('Day ', 'D')}</button>`).join('')}</div>
     <div class="card tight">
-      <div class="row between"><div class="b sm">ウォームアップ</div><div class="xs dim">${day.sub}</div></div>
+      <div class="row between">
+        <div class="b sm">ウォームアップ</div>
+        <label class="datepick">${d0 === today() ? '今日' : ''}<input type="date" id="logdate" value="${d0}"></label>
+      </div>
+      <div class="xs dim" style="margin:2px 0 8px">${day.sub}</div>
       <div class="warmup">${day.warmup.map(w => `<span class="pill">${esc(w)}</span>`).join('')}</div>
-      <div id="sessbar">${doneToday && !sess ? `<div class="hr"></div><div class="xs ok">✓ 今日の ${day.name} は完了済み（追記すると再開します）</div>` : ''}</div>
+      <div id="sessbar">${doneToday && !sess ? `<div class="hr"></div><div class="xs ok">✓ ${fmtDate(d0)} の ${day.name} は完了済み（追記すると再開します）</div>` : ''}</div>
     </div>
     <div id="exlist"></div>
   `;
   el.querySelector('.seg').onclick = e => {
     const b = e.target.closest('button[data-d]'); if (!b) return;
     S.day = b.dataset.d; save(); render();
+  };
+  el.querySelector('#logdate').onchange = e => {
+    S.logDate = e.target.value === today() ? null : e.target.value; save(); render();
   };
   if (sess) showFinishBar(day);
   renderExList(el.querySelector('#exlist'), day, sess);
@@ -229,6 +243,13 @@ function renderExList(host, day, sess) {
     b.querySelector('.chev').textContent = open ? '▾' : '▴';
   });
   host.addEventListener('input', e => {
+    const nm = e.target.closest('input[data-name]');
+    if (nm) {
+      const id = nm.dataset.name, v = nm.value.trim();
+      if (!v || v === (EX_MAP[id] || {}).name) delete S.names[id]; else S.names[id] = v;
+      nm.dataset.custom = S.names[id] ? '1' : '';
+      save(); return;
+    }
     const inp = e.target.closest('input[data-ex]'); if (!inp) return;
     const first = !sess; need();
     const { ex, i, k } = inp.dataset;
@@ -238,6 +259,10 @@ function renderExList(host, day, sess) {
     save();
     updateDelta(ex, sess);
     if (first) showFinishBar(day);
+  });
+  host.addEventListener('focusout', e => {
+    const nm = e.target.closest('input[data-name]');
+    if (nm && !nm.value.trim()) nm.value = (EX_MAP[nm.dataset.name] || {}).name || '';
   });
   host.addEventListener('click', e => {
     const add = e.target.closest('[data-add]');
@@ -263,10 +288,9 @@ function exCard(it, sess, isAlt) {
   const b1 = p1 && bestOf(p1.logs[it.id]);
   const b2 = p2 && bestOf(p2.logs[it.id]);
   const sets = (sess && sess.logs[it.id]) || [];
-  const rows = (sets.length ? sets : [{ w: '', r: '' }]);
+  const rows = sets.length ? sets : Array.from({ length: it.sets || 2 }, () => ({ w: '', r: '' }));
 
   const pills = [
-    it.video ? `<span class="pill acc">REC</span>` : '',
     it.setting ? `<span class="pill">${esc(it.setting)}</span>` : '',
     it.target ? `<span class="pill">${it.target}${it.each ? 'e' : ''} reps</span>` : '',
     it.note ? `<span class="pill">${esc(it.note)}</span>` : ''
@@ -275,7 +299,7 @@ function exCard(it, sess, isAlt) {
   const prevHTML = `<div class="prev">
     ${b1 ? `<div class="prevbox"><span class="xs dim">前回 ${fmtDate(p1.date)}</span><br><b>${esc(setLabel(b1))}</b></div>` : `<div class="prevbox xs dim">記録なし</div>`}
     ${b2 ? `<div class="prevbox"><span class="xs dim">前々回 ${fmtDate(p2.date)}</span><br><b class="mut">${esc(setLabel(b2))}</b></div>` : ''}
-    <div class="prevbox" id="dl-${it.id}" style="border-style:dashed"><span class="xs dim">今回</span><br><b class="dim">—</b></div>
+    <div class="prevbox now" id="dl-${it.id}"><span class="xs dim">今回</span><br><b class="dim">—</b></div>
   </div>`;
 
   const setRows = rows.map((s, i) => `
@@ -295,7 +319,9 @@ function exCard(it, sess, isAlt) {
 
   const inner = `
     <div class="exhead">
-      <div class="grow"><div class="exname">${esc(it.name)}</div>
+      <div class="grow">
+        <input class="exname" data-name="${it.id}" value="${esc(exName(it))}" placeholder="種目名"
+          ${S.names[it.id] ? 'data-custom="1"' : ''}>
         <div class="row" style="gap:5px;margin-top:5px;flex-wrap:wrap">${pills}</div></div>
       ${it.analyze ? `<button class="btn sm gho" data-analyze="${it.analyze}">解析</button>` : ''}
     </div>
@@ -479,7 +505,7 @@ function viewHistory(el) {
     <h2 class="sec">種目別 推定1RM</h2>
     <div class="card">
       <select id="hex" style="margin-bottom:10px">
-        ${PROGRAM.map(d => `<optgroup label="${d.name}">${d.items.flatMap(it => [it, ...it.alts]).map(it => `<option value="${it.id}" ${it.id === sel ? 'selected' : ''}>${esc(it.name)}</option>`).join('')}</optgroup>`).join('')}
+        ${PROGRAM.map(d => `<optgroup label="${d.name}">${d.items.flatMap(it => [it, ...it.alts]).map(it => `<option value="${it.id}" ${it.id === sel ? 'selected' : ''}>${esc(exName(it))}</option>`).join('')}</optgroup>`).join('')}
       </select>
       <canvas class="chart" id="c1"></canvas>
       ${recs.length >= 2 ? (() => {
@@ -499,7 +525,7 @@ function viewHistory(el) {
         <div class="row between"><div><b class="sm">${day ? day.name : s.day}</b> <span class="xs dim">${s.date} (${daysAgo(s.date)}日前)</span></div>
         <div class="row" style="gap:6px"><span class="pill">${n}種目</span>${s.done ? '' : '<span class="pill acc">進行中</span>'}
         <button class="btn sm gho" data-sdel="${s.id}">×</button></div></div>
-        <div class="xs mut" style="margin-top:6px">${Object.entries(s.logs).map(([k, v]) => { const b = bestOf(v); return b ? `${esc((EX_MAP[k] || {}).name || k)} ${esc(setLabel(b))}` : ''; }).filter(Boolean).join(' ／ ')}</div>
+        <div class="xs mut" style="margin-top:6px">${Object.entries(s.logs).map(([k, v]) => { const b = bestOf(v); return b ? `${esc(EX_MAP[k] ? exName(EX_MAP[k]) : k)} ${esc(setLabel(b))}` : ''; }).filter(Boolean).join(' ／ ')}</div>
       </div>`;
     }).join('') : '<div class="card sm dim">履歴なし</div>'}
   `;
