@@ -98,6 +98,15 @@ input.exname{font-weight:800;font-size:16px;letter-spacing:.01em;background:tran
 input.exname:focus{background:var(--bg3);border-color:var(--acc);box-shadow:0 0 0 3px rgba(91,149,255,.16)}
 input.exname[data-custom="1"]{color:#cfe0ff}
 
+/* 種目メモ（通常は非表示） */
+.memobtn{flex:0 0 auto;color:var(--dim);font-size:14px;padding:6px 8px;border-radius:9px;
+  border:1px solid transparent;line-height:1}
+.memobtn.on{color:var(--acc);border-color:rgba(91,149,255,.3);background:rgba(91,149,255,.1)}
+.memobtn:active{background:var(--bg3)}
+.memorow{margin-top:9px}
+.memorow input{font-size:12.5px;padding:8px 10px;background:var(--bg3);border-color:var(--line2)}
+.memorow input::placeholder{color:var(--dim);font-weight:500}
+
 .datepick{position:relative;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dim);
   font-weight:700;background:var(--bg3);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
 .datepick input{background:transparent;border:none;padding:0;width:auto;font-size:12px;font-weight:700;

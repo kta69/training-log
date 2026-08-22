@@ -27,6 +27,7 @@ function defaults() {
     targets: {},
     order: {},
     presets: {},
+    memos: {},
     tab: 'workout',
     day: 'day1',
     mealDate: null,
@@ -239,8 +240,7 @@ function viewWorkout(el) {
   el.innerHTML = `
     <div class="seg">${PROGRAM.map(d => `<button data-d="${d.id}" class="${d.id === day.id ? 'on' : ''}">${d.name.replace('Day ', 'D')}</button>`).join('')}</div>
     <div class="card tight">
-      <div class="row between">
-        <div class="b sm">${esc(day.sub)}</div>
+      <div class="row" style="justify-content:flex-end">
         <label class="datepick">${d0 === today() ? '今日' : ''}<input type="date" id="logdate" value="${d0}"></label>
       </div>
       <div id="sessbar">${doneToday && !sess ? `<div class="hr"></div><div class="xs ok">✓ ${fmtDate(d0)} の ${day.name} は完了済み（追記すると再開します）</div>` : ''}</div>
@@ -293,6 +293,14 @@ function renderExList(host, day, sess) {
       nm.dataset.custom = S.names[id] ? '1' : '';
       save(); return;
     }
+    const mo = e.target.closest('input[data-memo]');
+    if (mo) {
+      const id = mo.dataset.memo, v = mo.value.trim();
+      if (v === (EX_MAP[id] || {}).setting) delete S.memos[id]; else S.memos[id] = v;
+      const btn = mo.closest('.card.ex').querySelector('[data-memotgl]');
+      if (btn) btn.classList.toggle('on', !!v);
+      save(); return;
+    }
     const tg = e.target.closest('input[data-tgt]');
     if (tg) {
       const id = tg.dataset.tgt, v = parseInt(tg.value, 10);
@@ -320,6 +328,15 @@ function renderExList(host, day, sess) {
     if (sess) updateDelta(activeVar(EX_MAP[mainId]).id, sess);
   };
   host.addEventListener('click', e => {
+    const mt = e.target.closest('[data-memotgl]');
+    if (mt) {
+      const id = mt.dataset.memotgl;
+      const row = mt.closest('.card.ex').querySelector('.memorow');
+      row.hidden = !row.hidden;
+      if (row.hidden) memoOpen.delete(id);
+      else { memoOpen.add(id); row.querySelector('input').focus(); }
+      return;
+    }
     const pk = e.target.closest('[data-pick]');
     if (pk) {
       const [mainId, exId] = pk.dataset.pick.split(':');
@@ -422,6 +439,9 @@ function activeVar(main) {
   return vs.find(v => v.id === S.pick[main.id]) || main;
 }
 const targetOf = it => S.targets[it.id] ?? it.target;
+/* 種目メモ（マシン設定など）。既定値は元データの setting */
+const memoOf = it => S.memos[it.id] ?? it.setting ?? '';
+const memoOpen = new Set();
 
 function exCard(main, sess) {
   const vs = variantsOf(main);
@@ -434,10 +454,14 @@ function exCard(main, sess) {
   const rows = sets.length ? sets : Array.from({ length: it.sets || 2 }, () => ({ w: '', r: '' }));
 
   const pills = [
-    it.setting ? `<span class="pill">${esc(it.setting)}</span>` : '',
     `<label class="pill tgt">目標<input inputmode="numeric" data-tgt="${it.id}" value="${esc(targetOf(it) || '')}" placeholder="—">${it.each ? 'e' : ''}reps</label>`,
     it.note ? `<span class="pill">${esc(it.note)}</span>` : ''
   ].join('');
+
+  const memo = memoOf(it);
+  const memoRow = `<div class="memorow" ${memoOpen.has(it.id) ? '' : 'hidden'}>
+    <input data-memo="${it.id}" value="${esc(memo)}" placeholder="椅子の高さ・セーフティー位置など">
+  </div>`;
 
   const others = vs.filter(v => v.id !== it.id);
   const swap = `
@@ -472,9 +496,11 @@ function exCard(main, sess) {
         <input class="exname" data-name="${it.id}" value="${esc(exName(it))}" placeholder="種目名"
           ${S.names[it.id] ? 'data-custom="1"' : ''}>
         <div class="row" style="gap:5px;margin-top:5px;flex-wrap:wrap">${pills}</div></div>
+      <button class="memobtn ${memo ? 'on' : ''}" data-memotgl="${it.id}" aria-label="メモ">✎&#xFE0E;</button>
       ${it.user ? `<button class="btn sm gho" data-delalt="${main.id}:${it.id}">削除</button>` : ''}
       ${it.analyze ? `<button class="btn sm gho" data-analyze="${it.analyze}">解析</button>` : ''}
     </div>
+    ${memoRow}
     ${swap}
     ${prevHTML}
     ${setRows}
@@ -673,39 +699,46 @@ function viewNutrition(el) {
   if (c) c.onclick = () => { delete S.meals[date]; save(); render(); };
 }
 
-/* 栄養バランスから「摂った方がいい食材」と理由を出す */
+/* 摂った方がいい食材：実際に不足しているものだけを、余った枠に収まる範囲で出す */
 function foodRecs(P, T, date) {
   const items = S.meals[date] || [];
+  if (!items.length) return [];
   const has = (...ids) => ids.some(f => items.some(i => i.fid === f));
-  const dP = T.p - P.p, dF = T.f - P.f, dC = T.c - P.c;
+  const dP = T.p - P.p, dF = T.f - P.f, dC = T.c - P.c, dK = T.kcal - P.kcal;
+  const done = P.kcal ? T.kcal / P.kcal : 0;   // その日の記録の進み具合
   const r = [];
 
-  if (dP < -12) {
-    r.push({ n: '鶏胸肉（皮なし）', q: `${n0(-dP / 0.233)}g`, why: '100gでP23.3g・脂質1.9g。カロリーをほぼ増やさずにタンパク質だけ積める最効率の食材です。' });
-    r.push({ n: 'プロテイン(WPC)', q: `${Math.ceil(-dP / 24)}杯`, why: '吸収が速くロイシンが多いので、トレ後2時間以内に入れると筋タンパク合成のスイッチが入りやすい。' });
+  // ① 不足マクロを埋める（足りているものは出さない）
+  if (dP < -15) {
+    r.push(dK < -200
+      ? { n: '鶏胸肉（皮なし）', q: `${n0(-dP / 0.233)}g`, why: `P が ${n0(-dP)}g 足りません。100gでP23.3g・脂質1.9gなので、カロリー枠 ${n0(-dK)}kcal を圧迫せずにPだけ積めます。` }
+      : { n: 'プロテイン(WPC)', q: `${Math.ceil(-dP / 24)}杯`, why: `P が ${n0(-dP)}g 足りない一方、カロリー枠はもう余っていません。1杯 115kcal でP24g のWPCが最も枠を食いません。` });
   }
-  if (!has('saba', 'whitefish')) {
-    r.push({ n: 'サバ水煮缶', q: '1缶', why: 'EPA/DHA（オメガ3）が今日ゼロです。トレ後の炎症を抑えて回復を早め、除脂肪量の維持に有利。P30g・F22gで脂質枠も同時に埋まります。' });
+  if (dC < -50) {
+    r.push({ n: 'さつまいも（蒸し）', q: `${n0(-dC / 0.319)}g`, why: `糖質が ${n0(-dC)}g 不足。GIが低く食物繊維も取れるので血糖が安定します。トレ前2時間に寄せると高重量セットの後半が保ちます。` });
   }
-  if (!has('spinach', 'broccoli', 'maitake', 'tomatocan')) {
-    r.push({ n: 'ほうれん草 / ブロッコリー', q: '各100g', why: '緑黄色野菜が入っていません。鉄と葉酸が不足すると酸素運搬が落ちて高レップの粘りが減り、ビタミンCが不足すると腱・靭帯のコラーゲン合成が滞ります。2つで55kcalなので枠を圧迫しません。' });
+  if (dF < -15) {
+    r.push({ n: 'アーモンド / オリーブオイル', q: '20g / 小さじ1', why: `脂質が ${n0(-dF)}g 不足。総カロリーの15%を割る状態が続くとテストステロンが下がりやすくなります。` });
   }
-  if (dC < -45 && !has('satsumaimo', 'oatmeal')) {
-    r.push({ n: 'さつまいも（蒸し）', q: `${n0(-dC / 0.319)}g`, why: '糖質が足りていません。GIが低く食物繊維も取れるので血糖が安定します。トレ前2時間に寄せると高重量セットの後半が保ちます。' });
+
+  // ② ＋αで効くもの（1日の記録が6割以上埋まってから＝食べ忘れではなく本当に抜けている時だけ）
+  if (done > 0.6) {
+    if (!has('saba', 'whitefish')) {
+      r.push({ n: 'サバ水煮缶', q: '1缶', why: 'EPA/DHA（オメガ3）が今日ゼロです。トレ後の炎症を鎮めて回復を早めます。P30gも同時に入るので、Pが足りない日はこれ1つで両方埋まります。' });
+    }
+    if (!has('spinach', 'broccoli', 'maitake', 'tomatocan', 'kiwi')) {
+      r.push({ n: 'ほうれん草 / ブロッコリー', q: '各100g', why: '野菜が入っていません。鉄と葉酸が不足すると酸素運搬が落ちて高レップの粘りが減り、ビタミンC不足は腱・靭帯のコラーゲン合成を鈍らせます。2つで55kcalです。' });
+    }
+    if (!has('creatine')) {
+      r.push({ n: 'クレアチン', q: '5g', why: '今日まだ摂れていません。高強度セットの反復を平均1〜2レップ押し上げる、最も再現性の高いサプリです。タイミングは不問で、毎日続けることが全てです。' });
+    }
   }
-  if (dF < -14 && !has('oliveoil', 'almond')) {
-    r.push({ n: 'オリーブオイル / アーモンド', q: '小さじ1 / 20g', why: '脂質が総カロリーの15%を割るとテストステロンが下がりやすくなります。一価不飽和脂肪酸で埋めるのが無難です。' });
+
+  // ③ 就寝前（1日ほぼ終わっていて、まだPが下限未満のときだけ）
+  if (done > 0.8 && P.key === 'recomp' && T.p < P.lbm * 2.2 && !has('oikos')) {
+    r.push({ n: 'ギリシャヨーグルト（就寝前）', q: '150g', why: `リコンプ中はP ${n0(P.lbm * 2.2)}g（LBM×2.2）が下限で、今日は ${n0(T.p)}g。消化の遅いカゼインを寝る前に入れると睡眠中の分解を抑えられます。` });
   }
-  if (!has('creatine')) {
-    r.push({ n: 'クレアチン', q: '5〜8g', why: '今日まだ摂っていません。高強度セットの反復を平均1〜2レップ押し上げる、最も再現性の高いサプリです。タイミングは不問で、毎日続けることが全てです。' });
-  }
-  if (!has('natto', 'yogurt', 'oikos', 'wakame')) {
-    r.push({ n: '納豆 / ヨーグルト', q: '1パック / 150g', why: '発酵食品と食物繊維がゼロです。腸内環境はタンパク質の利用効率に効きます。納豆はビタミンK2で骨密度、わかめはヨウ素と食物繊維を補えます。' });
-  }
-  if (P.key === 'recomp' && T.p > 0 && T.p < P.lbm * 2.2) {
-    r.push({ n: 'ギリシャヨーグルト（就寝前）', q: '150g', why: `リコンプ中はP ${n0(P.lbm * 2.2)}g（LBM×2.2）が下限。消化の遅いカゼインを寝る前に入れると、睡眠中の分解を抑えられます。` });
-  }
-  return r;
+  return r.slice(0, 3);
 }
 
 function advice(P, T, date) {
