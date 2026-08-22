@@ -17,11 +17,12 @@ const flatItems = day => day.items.flatMap(it => [it, ...it.alts]);
 
 function defaults() {
   return {
-    settings: { height: 172, age: 30, sex: 'm', activity: 1.55, targetW: 70, targetBf: 10 },
+    settings: { height: 172, age: 30, sex: 'm', activity: 1.55, targetW: 70, targetBf: 10, bfCal: 0 },
     body: [],
     sessions: [],
     meals: {},
     names: {},
+    pick: {},
     tab: 'workout',
     day: 'day1',
     mealDate: null,
@@ -48,7 +49,9 @@ function seedSessions() {
 let S;
 try { S = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { S = null; }
 if (!S) { S = defaults(); S.sessions = seedSessions(); }
-S = Object.assign(defaults(), S);
+const _d = defaults();
+S = Object.assign(_d, S);
+S.settings = Object.assign(_d.settings, S.settings);
 const save = () => localStorage.setItem(KEY, JSON.stringify(S));
 
 /* ============ Utils ============ */
@@ -179,9 +182,11 @@ const app = () => document.getElementById('app');
 function go(tab) { S.tab = tab; save(); render(); requestAnimationFrame(() => window.scrollTo(0, 0)); }
 
 function render() {
-  document.querySelectorAll('#tabbar button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
+  const lit = S.tab === 'body' ? 'settings' : S.tab;
+  document.querySelectorAll('#tabbar button').forEach(b => b.classList.toggle('on', b.dataset.tab === lit));
   const el = app();
-  ({ workout: viewWorkout, nutrition: viewNutrition, form: viewForm, history: viewHistory, settings: viewSettings }[S.tab])(el);
+  const V = { workout: viewWorkout, nutrition: viewNutrition, form: viewForm, history: viewHistory, settings: viewSettings, body: viewBody };
+  (V[S.tab] || viewWorkout)(el);
 }
 document.getElementById('tabbar').addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]'); if (b) go(b.dataset.tab);
@@ -235,13 +240,7 @@ function showFinishBar(day) {
 
 function renderExList(host, day, sess) {
   const need = () => sess || (sess = openSession(day.id));
-  host.innerHTML = day.items.map(it => exCard(it, sess, false)).join('');
-  host.querySelectorAll('.altbtn').forEach(b => b.onclick = () => {
-    const box = b.nextElementSibling;
-    const open = box.style.display !== 'none';
-    box.style.display = open ? 'none' : 'block';
-    b.querySelector('.chev').textContent = open ? '▾' : '▴';
-  });
+  host.innerHTML = day.items.map(it => exCard(it, sess)).join('');
   host.addEventListener('input', e => {
     const nm = e.target.closest('input[data-name]');
     if (nm) {
@@ -265,6 +264,18 @@ function renderExList(host, day, sess) {
     if (nm && !nm.value.trim()) nm.value = (EX_MAP[nm.dataset.name] || {}).name || '';
   });
   host.addEventListener('click', e => {
+    const pk = e.target.closest('[data-pick]');
+    if (pk) {
+      const [mainId, exId] = pk.dataset.pick.split(':');
+      if (exId === mainId) delete S.pick[mainId]; else S.pick[mainId] = exId;
+      save();
+      const card = pk.closest('.card.ex');
+      const scroll = window.scrollY;
+      card.outerHTML = exCard(EX_MAP[mainId], sess);
+      window.scrollTo(0, scroll);
+      if (sess) updateDelta(activeVar(EX_MAP[mainId]).id, sess);
+      return;
+    }
     const add = e.target.closest('[data-add]');
     if (add) {
       need();
@@ -280,9 +291,21 @@ function renderExList(host, day, sess) {
     const an = e.target.closest('[data-analyze]');
     if (an) { window.FA_PRESET = an.dataset.analyze; go('form'); }
   });
+  if (sess) day.items.forEach(it => {
+    const a = activeVar(it);
+    if (sess.logs[a.id]) updateDelta(a.id, sess);
+  });
 }
 
-function exCard(it, sess, isAlt) {
+const variantsOf = main => [main, ...main.alts];
+function activeVar(main) {
+  const vs = variantsOf(main);
+  return vs.find(v => v.id === S.pick[main.id]) || main;
+}
+
+function exCard(main, sess) {
+  const vs = variantsOf(main);
+  const it = activeVar(main);
   const prev = prevRecords(it.id, sess && sess.id);
   const p1 = prev[0], p2 = prev[1];
   const b1 = p1 && bestOf(p1.logs[it.id]);
@@ -296,8 +319,19 @@ function exCard(it, sess, isAlt) {
     it.note ? `<span class="pill">${esc(it.note)}</span>` : ''
   ].join('');
 
+  const others = vs.filter(v => v.id !== it.id);
+  const swap = others.length ? `
+    <div class="swap">
+      <span class="swaplbl">切替</span>
+      ${others.map(v => {
+        const has = sess && sess.logs[v.id] && sess.logs[v.id].some(s => s.w || s.r);
+        return `<button class="vchip" data-pick="${main.id}:${v.id}">
+          <i class="alt">${v.id === main.id ? 'メイン' : '代替'}</i>${esc(exName(v))}${has ? '<i class="dot"></i>' : ''}</button>`;
+      }).join('')}
+    </div>` : '';
+
   const prevHTML = `<div class="prev">
-    ${b1 ? `<div class="prevbox"><span class="xs dim">前回 ${fmtDate(p1.date)}</span><br><b>${esc(setLabel(b1))}</b></div>` : `<div class="prevbox xs dim">記録なし</div>`}
+    ${b1 ? `<div class="prevbox"><span class="xs dim">前回 ${fmtDate(p1.date)}</span><br><b>${esc(setLabel(b1))}</b></div>` : `<div class="prevbox"><span class="xs dim">前回</span><br><b class="dim">—</b></div>`}
     ${b2 ? `<div class="prevbox"><span class="xs dim">前々回 ${fmtDate(p2.date)}</span><br><b class="mut">${esc(setLabel(b2))}</b></div>` : ''}
     <div class="prevbox now" id="dl-${it.id}"><span class="xs dim">今回</span><br><b class="dim">—</b></div>
   </div>`;
@@ -311,13 +345,7 @@ function exCard(it, sess, isAlt) {
       <button class="del" data-del="${it.id}:${i}">×</button>
     </div>`).join('');
 
-  const alts = !isAlt && it.alts.length ? `
-    <div class="alts">
-      <button class="altbtn"><span>代替種目 ${it.alts.length}件</span><span class="chev">▾</span></button>
-      <div style="display:none">${it.alts.map(a => `<div class="altcard">${exCard(a, sess, true)}</div>`).join('')}</div>
-    </div>` : '';
-
-  const inner = `
+  return `<div class="card ex">
     <div class="exhead">
       <div class="grow">
         <input class="exname" data-name="${it.id}" value="${esc(exName(it))}" placeholder="種目名"
@@ -325,11 +353,11 @@ function exCard(it, sess, isAlt) {
         <div class="row" style="gap:5px;margin-top:5px;flex-wrap:wrap">${pills}</div></div>
       ${it.analyze ? `<button class="btn sm gho" data-analyze="${it.analyze}">解析</button>` : ''}
     </div>
+    ${swap}
     ${prevHTML}
     ${setRows}
-    <button class="btn sm gho" data-add="${it.id}" style="margin-top:8px;width:100%">＋ セット</button>
-    ${alts}`;
-  return isAlt ? inner : `<div class="card">${inner}</div>`;
+    <button class="btn sm gho addset" data-add="${it.id}">＋ セット</button>
+  </div>`;
 }
 
 function updateDelta(exId, sess) {
@@ -489,6 +517,15 @@ function viewForm(el) {
   else el.innerHTML = '<div class="card sm mut">解析エンジンを読み込み中… <span class="spin"></span></div>';
 }
 
+/* ============ 写真から体組成（本体は body.js） ============ */
+function viewBody(el) {
+  document.getElementById('bar-title').textContent = '体組成スキャン';
+  document.getElementById('bar-right').innerHTML = '<button class="btn sm gho" id="bback">戻る</button>';
+  document.getElementById('bback').onclick = () => go('settings');
+  if (window.BodyUI) window.BodyUI.render(el);
+  else el.innerHTML = '<div class="card sm mut">解析エンジンを読み込み中… <span class="spin"></span></div>';
+}
+
 /* ============ 記録 ============ */
 function viewHistory(el) {
   document.getElementById('bar-title').textContent = '記録';
@@ -553,6 +590,7 @@ function viewSettings(el) {
         <div class="grow"><label class="fl">体脂肪率 (%)</label><input id="bf" inputmode="decimal" value="${b && b.bf != null ? b.bf : ''}" placeholder="15.0"></div>
       </div>
       <button class="btn pri full" id="brec" style="margin-top:11px">今日の記録として保存</button>
+      <button class="btn full" id="bscan" style="margin-top:8px">写真から体脂肪率を推定</button>
       ${b ? `<div class="xs dim" style="margin-top:8px;text-align:center">最終記録: ${b.date}（${daysAgo(b.date)}日前）· 全${S.body.length}件</div>` : ''}
     </div>
 
@@ -582,6 +620,7 @@ function viewSettings(el) {
       </div>
     </div>
   `;
+  el.querySelector('#bscan').onclick = () => go('body');
   el.querySelector('#brec').onclick = () => {
     const w = parseFloat(el.querySelector('#bw').value), bf = parseFloat(el.querySelector('#bf').value);
     if (!w) { toast('体重を入力'); return; }
