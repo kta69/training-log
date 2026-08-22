@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0c0e13">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Training">
+<title>Training Log</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="styles.css?v=1">
+</head>
+<body>
+
+<header id="appbar">
+  <div id="bar-title">Training Log</div>
+  <div id="bar-right"></div>
+</header>
+
+<main id="app"></main>
+
+<nav id="tabbar">
+  <button data-tab="workout"><span>▤</span>筋トレ</button>
+  <button data-tab="nutrition"><span>◍</span>食事</button>
+  <button data-tab="form"><span>▶</span>フォーム</button>
+  <button data-tab="history"><span>◔</span>記録</button>
+  <button data-tab="settings"><span>⚙</span>設定</button>
+</nav>
+
+<div id="toast"></div>
+
+<script src="data.js?v=1"></script>
+<script src="app.js?v=1"></script>
+<script type="module" src="form.js?v=1"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
