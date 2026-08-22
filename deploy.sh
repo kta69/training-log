@@ -16,6 +16,8 @@ fi
 USER=$(gh api user --jq .login)
 
 git init -q 2>/dev/null || true
+git config user.name  >/dev/null 2>&1 || git config user.name  "$USER"
+git config user.email >/dev/null 2>&1 || git config user.email "$USER@users.noreply.github.com"
 git add -A
 git commit -q -m "Update training log app" || echo "（変更なし）"
 git branch -M main
