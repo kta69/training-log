@@ -86,6 +86,13 @@ label.fl{display:block;font-size:11px;color:var(--dim);margin-bottom:4px;font-we
 
 /* ---- workout ---- */
 .exhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.grip{flex:0 0 auto;touch-action:none;cursor:grab;color:var(--dim);font-size:17px;line-height:1;
+  padding:5px 4px;margin:-3px -2px -3px -4px;border-radius:8px;letter-spacing:-.2em}
+.grip:active{background:var(--bg3);color:var(--acc)}
+#exlist.reordering{cursor:grabbing}
+#exlist.reordering .card.ex{transition:transform .18s cubic-bezier(.2,.7,.3,1);animation:none}
+.card.ex.dragging{opacity:.92;border-color:var(--acc);transform:scale(1.02);
+  box-shadow:0 0 0 1px rgba(91,149,255,.4),0 14px 30px -10px rgba(0,0,0,.75)}
 input.exname{font-weight:800;font-size:16px;letter-spacing:.01em;background:transparent;border:1px solid transparent;
   border-radius:8px;padding:2px 6px;margin:-2px -6px;width:100%;box-shadow:none}
 input.exname:focus{background:var(--bg3);border-color:var(--acc);box-shadow:0 0 0 3px rgba(91,149,255,.16)}
@@ -124,6 +131,26 @@ input.exname[data-custom="1"]{color:#cfe0ff}
 .vchip i.dot{width:5px;height:5px;border-radius:50%;background:var(--ok);flex:0 0 auto;
   box-shadow:0 0 6px var(--ok)}
 .vchip.add{border-style:dashed;color:var(--dim)}
+
+/* プリセット編集 */
+.peditor{background:var(--bg3);border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:9px}
+.peditor + .peditor{margin-top:0}
+input.pname{font-weight:800;font-size:14px;background:transparent;border:1px solid transparent;
+  border-radius:8px;padding:4px 6px;box-shadow:none}
+input.pname:focus{background:var(--bg);border-color:var(--acc);box-shadow:0 0 0 3px rgba(91,149,255,.16)}
+.prow{display:grid;grid-template-columns:1fr 62px 22px 26px;align-items:center;gap:6px;margin-top:7px}
+.prow select{font-size:12.5px;padding:7px 24px 7px 8px;height:auto}
+.prow input{text-align:center;padding:7px 2px;font-size:13px;font-weight:700}
+.prow .del{color:var(--dim);font-size:16px;border-radius:8px;padding:4px 0}
+.prow .del:active{background:var(--bg2);color:var(--bad)}
+
+/* おすすめ食材 */
+.frec{display:flex;gap:9px;padding:9px 0;border-top:1px solid var(--line)}
+.frec:first-child{border-top:none;padding-top:0}
+.frec > b{flex:0 0 auto;font-size:13px}
+.frec .q{flex:0 0 auto;font-size:11px;font-weight:800;color:var(--acc);
+  background:rgba(91,149,255,.13);border-radius:6px;padding:2px 6px;align-self:flex-start}
+.frec .why{font-size:11.5px;line-height:1.55;color:var(--mut)}
 
 /* pill の中に置くセレクト */
 select.bare{background:transparent;border:none;padding:0 2px;font-size:11.5px;font-weight:800;

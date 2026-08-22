@@ -25,6 +25,8 @@ function defaults() {
     pick: {},
     alts: {},
     targets: {},
+    order: {},
+    presets: {},
     tab: 'workout',
     day: 'day1',
     mealDate: null,
@@ -154,6 +156,16 @@ function plan() {
   return { w, bf, lbm, bmr, tdee, key, mode: MODE_LABEL[key], why: MODE_WHY[key], auto,
     kcal, p, f, c, deficit, fatDelta, lbmDelta, weeks, hasBody: !!b };
 }
+/* プリセット（ユーザー編集を優先） */
+const presetOf = m => S.presets[m.id] || m;
+const presetName = m => presetOf(m).n || m.n;
+const presetItems = m => presetOf(m).items || m.items;
+function editPreset(id) {
+  const base = MEAL_PRESETS.find(m => m.id === id);
+  if (!S.presets[id]) S.presets[id] = { n: base.n, items: base.items.map(i => ({ ...i })) };
+  return S.presets[id];
+}
+
 function foodMacros(fid, g) {
   const F = FOODS[fid]; if (!F) return { kcal: 0, p: 0, f: 0, c: 0 };
   const k = F.unitG ? g : g / 100;
@@ -228,11 +240,9 @@ function viewWorkout(el) {
     <div class="seg">${PROGRAM.map(d => `<button data-d="${d.id}" class="${d.id === day.id ? 'on' : ''}">${d.name.replace('Day ', 'D')}</button>`).join('')}</div>
     <div class="card tight">
       <div class="row between">
-        <div class="b sm">ウォームアップ</div>
+        <div class="b sm">${esc(day.sub)}</div>
         <label class="datepick">${d0 === today() ? '今日' : ''}<input type="date" id="logdate" value="${d0}"></label>
       </div>
-      <div class="xs dim" style="margin:2px 0 8px">${day.sub}</div>
-      <div class="warmup">${day.warmup.map(w => `<span class="pill">${esc(w)}</span>`).join('')}</div>
       <div id="sessbar">${doneToday && !sess ? `<div class="hr"></div><div class="xs ok">✓ ${fmtDate(d0)} の ${day.name} は完了済み（追記すると再開します）</div>` : ''}</div>
     </div>
     <div id="exlist"></div>
@@ -261,9 +271,20 @@ function showFinishBar(day) {
   };
 }
 
+/* 並び順（ドラッグで変更可） */
+function orderedItems(day) {
+  const ord = S.order[day.id];
+  if (!ord) return day.items;
+  const by = {}; day.items.forEach(it => by[it.id] = it);
+  const out = ord.map(id => by[id]).filter(Boolean);
+  day.items.forEach(it => { if (!out.includes(it)) out.push(it); });
+  return out;
+}
+
 function renderExList(host, day, sess) {
   const need = () => sess || (sess = openSession(day.id));
-  host.innerHTML = day.items.map(it => exCard(it, sess)).join('');
+  host.innerHTML = orderedItems(day).map(it => exCard(it, sess)).join('');
+  enableReorder(host, day);
   host.addEventListener('input', e => {
     const nm = e.target.closest('input[data-name]');
     if (nm) {
@@ -350,6 +371,45 @@ function renderExList(host, day, sess) {
   });
 }
 
+/* 指でドラッグして種目の並びを入れ替える */
+function enableReorder(host, day) {
+  let dragging = null;
+  const commit = () => {
+    S.order[day.id] = [...host.querySelectorAll('.card.ex')].map(c => c.dataset.main);
+    save();
+  };
+  const slotBefore = y => [...host.querySelectorAll('.card.ex:not(.dragging)')]
+    .reduce((best, c) => {
+      const b = c.getBoundingClientRect(), off = y - (b.top + b.height / 2);
+      return off < 0 && off > best.off ? { off, el: c } : best;
+    }, { off: -Infinity, el: null }).el;
+
+  host.addEventListener('pointerdown', e => {
+    const g = e.target.closest('.grip'); if (!g) return;
+    dragging = g.closest('.card.ex'); if (!dragging) return;
+    e.preventDefault();
+    g.setPointerCapture(e.pointerId);
+    dragging.classList.add('dragging');
+    host.classList.add('reordering');
+  });
+  host.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    e.preventDefault();
+    const after = slotBefore(e.clientY);
+    if (after) { if (after !== dragging.nextElementSibling) host.insertBefore(dragging, after); }
+    else if (dragging !== host.lastElementChild) host.appendChild(dragging);
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging.classList.remove('dragging');
+    host.classList.remove('reordering');
+    dragging = null;
+    commit();
+  };
+  host.addEventListener('pointerup', end);
+  host.addEventListener('pointercancel', end);
+}
+
 /* 自分で追加した種目：id だけ保存し、名前は S.names、他の属性はメインを継承 */
 const userAlts = main => (S.alts[main.id] || []).map(id => ({
   id, name: '新しい種目', user: true, target: main.target, each: main.each,
@@ -405,8 +465,9 @@ function exCard(main, sess) {
       <button class="del" data-del="${it.id}:${i}">×</button>
     </div>`).join('');
 
-  return `<div class="card ex">
+  return `<div class="card ex" data-main="${main.id}">
     <div class="exhead">
+      <button class="grip" aria-label="並び替え">⠿</button>
       <div class="grow">
         <input class="exname" data-name="${it.id}" value="${esc(exName(it))}" placeholder="種目名"
           ${S.names[it.id] ? 'data-custom="1"' : ''}>
@@ -440,6 +501,28 @@ function updateDelta(exId, sess) {
 }
 
 /* ============ 食事 ============ */
+let editMode = false;
+const foodOptions = sel => Object.entries(FOODS)
+  .map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(v.n)}</option>`).join('');
+
+function presetEditor(m) {
+  const items = presetItems(m), custom = !!S.presets[m.id];
+  return `<div class="peditor">
+    <div class="row" style="gap:7px">
+      <span>${m.icon}</span>
+      <input class="pname grow" data-pname="${m.id}" value="${esc(presetName(m))}">
+      ${custom ? `<button class="btn sm gho" data-preset-reset="${m.id}">既定に戻す</button>` : ''}
+    </div>
+    ${items.map((i, idx) => `<div class="prow">
+      <select data-pf="${m.id}:${idx}">${foodOptions(i.fid)}</select>
+      <input inputmode="decimal" data-pg="${m.id}:${idx}" value="${i.g}">
+      <span class="xs dim">${FOODS[i.fid] ? FOODS[i.fid].u : ''}</span>
+      <button class="del" data-pdel="${m.id}:${idx}">×</button>
+    </div>`).join('')}
+    <button class="btn sm gho full" data-padd="${m.id}" style="margin-top:7px">＋ 食材</button>
+  </div>`;
+}
+
 function viewNutrition(el) {
   const date = S.mealDate || today();
   const P = plan(), T = dayTotals(date), items = S.meals[date] || [];
@@ -478,12 +561,17 @@ function viewNutrition(el) {
 
     <h2 class="sec">クイック追加</h2>
     <div class="card tight">
-      <div class="row" style="flex-wrap:wrap;gap:7px">
-        ${MEAL_PRESETS.map(m => `<button class="btn sm" data-preset="${m.id}">${m.icon} ${esc(m.n)}</button>`).join('')}
+      <div class="row between" style="margin-bottom:8px">
+        <span class="xs dim">1タップでまとめて記録</span>
+        <button class="btn sm gho" id="pedit">${editMode ? '完了' : '中身を編集'}</button>
       </div>
+      ${editMode ? MEAL_PRESETS.map(presetEditor).join('') : `
+      <div class="row" style="flex-wrap:wrap;gap:7px">
+        ${MEAL_PRESETS.map(m => `<button class="btn sm" data-preset="${m.id}">${m.icon} ${esc(presetName(m))}</button>`).join('')}
+      </div>`}
       <div class="hr"></div>
       <div class="row" style="gap:7px">
-        <select id="fsel" class="grow">${Object.entries(FOODS).map(([k, v]) => `<option value="${k}">${esc(v.n)}</option>`).join('')}</select>
+        <select id="fsel" class="grow">${foodOptions()}</select>
         <input id="fg" inputmode="decimal" placeholder="量" style="width:74px;text-align:center">
         <button class="btn sm pri" id="fadd">追加</button>
       </div>
@@ -504,6 +592,13 @@ function viewNutrition(el) {
 
     <h2 class="sec">アドバイス</h2>
     ${advice(P, T, date).map(a => `<div class="advice ${a.k}">${a.t}</div>`).join('')}
+
+    ${(() => { const R = foodRecs(P, T, date); return R.length ? `
+    <h2 class="sec">摂った方がいい食材</h2>
+    <div class="card">${R.map(x => `<div class="frec">
+      <span class="q">${esc(x.q)}</span>
+      <div><b>${esc(x.n)}</b><div class="why">${x.why}</div></div>
+    </div>`).join('')}</div>` : ''; })()}
 
     <h2 class="sec">目標の内訳</h2>
     <div class="card sm">
@@ -533,8 +628,34 @@ function viewNutrition(el) {
   el.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => {
     const m = MEAL_PRESETS.find(x => x.id === b.dataset.preset);
     const arr = S.meals[date] || (S.meals[date] = []);
-    m.items.forEach(i => arr.push({ ...i }));
-    save(); render(); toast(m.n + ' を追加');
+    presetItems(m).forEach(i => arr.push({ ...i }));
+    save(); render(); toast(presetName(m) + ' を追加');
+  });
+  el.querySelector('#pedit').onclick = () => { editMode = !editMode; render(); };
+  // #app は使い回されるので、毎回作り直されるカードにだけ委譲を張る
+  const pcard = el.querySelector('#pedit').closest('.card');
+  pcard.addEventListener('input', e => {
+    const nm = e.target.closest('[data-pname]');
+    if (nm) { editPreset(nm.dataset.pname).n = nm.value.trim() || undefined; save(); return; }
+    const g = e.target.closest('[data-pg]');
+    if (g) {
+      const [id, idx] = g.dataset.pg.split(':');
+      editPreset(id).items[+idx].g = parseFloat(g.value) || 0; save();
+    }
+  });
+  pcard.addEventListener('change', e => {
+    const f = e.target.closest('[data-pf]');
+    if (!f) return;
+    const [id, idx] = f.dataset.pf.split(':');
+    editPreset(id).items[+idx].fid = f.value; save(); render();
+  });
+  pcard.addEventListener('click', e => {
+    const d = e.target.closest('[data-pdel]');
+    if (d) { const [id, idx] = d.dataset.pdel.split(':'); editPreset(id).items.splice(+idx, 1); save(); render(); return; }
+    const a = e.target.closest('[data-padd]');
+    if (a) { editPreset(a.dataset.padd).items.push({ fid: Object.keys(FOODS)[0], g: 100 }); save(); render(); return; }
+    const r = e.target.closest('[data-preset-reset]');
+    if (r) { delete S.presets[r.dataset.presetReset]; save(); render(); toast('既定に戻しました'); }
   });
   el.querySelector('#fadd').onclick = () => {
     const fid = el.querySelector('#fsel').value, g = parseFloat(el.querySelector('#fg').value);
@@ -550,6 +671,41 @@ function viewNutrition(el) {
   el.querySelector('#goal').onchange = e => { S.settings.goal = e.target.value; save(); render(); };
   const c = el.querySelector('#clr');
   if (c) c.onclick = () => { delete S.meals[date]; save(); render(); };
+}
+
+/* 栄養バランスから「摂った方がいい食材」と理由を出す */
+function foodRecs(P, T, date) {
+  const items = S.meals[date] || [];
+  const has = (...ids) => ids.some(f => items.some(i => i.fid === f));
+  const dP = T.p - P.p, dF = T.f - P.f, dC = T.c - P.c;
+  const r = [];
+
+  if (dP < -12) {
+    r.push({ n: '鶏胸肉（皮なし）', q: `${n0(-dP / 0.233)}g`, why: '100gでP23.3g・脂質1.9g。カロリーをほぼ増やさずにタンパク質だけ積める最効率の食材です。' });
+    r.push({ n: 'プロテイン(WPC)', q: `${Math.ceil(-dP / 24)}杯`, why: '吸収が速くロイシンが多いので、トレ後2時間以内に入れると筋タンパク合成のスイッチが入りやすい。' });
+  }
+  if (!has('saba', 'whitefish')) {
+    r.push({ n: 'サバ水煮缶', q: '1缶', why: 'EPA/DHA（オメガ3）が今日ゼロです。トレ後の炎症を抑えて回復を早め、除脂肪量の維持に有利。P30g・F22gで脂質枠も同時に埋まります。' });
+  }
+  if (!has('spinach', 'broccoli', 'maitake', 'tomatocan')) {
+    r.push({ n: 'ほうれん草 / ブロッコリー', q: '各100g', why: '緑黄色野菜が入っていません。鉄と葉酸が不足すると酸素運搬が落ちて高レップの粘りが減り、ビタミンCが不足すると腱・靭帯のコラーゲン合成が滞ります。2つで55kcalなので枠を圧迫しません。' });
+  }
+  if (dC < -45 && !has('satsumaimo', 'oatmeal')) {
+    r.push({ n: 'さつまいも（蒸し）', q: `${n0(-dC / 0.319)}g`, why: '糖質が足りていません。GIが低く食物繊維も取れるので血糖が安定します。トレ前2時間に寄せると高重量セットの後半が保ちます。' });
+  }
+  if (dF < -14 && !has('oliveoil', 'almond')) {
+    r.push({ n: 'オリーブオイル / アーモンド', q: '小さじ1 / 20g', why: '脂質が総カロリーの15%を割るとテストステロンが下がりやすくなります。一価不飽和脂肪酸で埋めるのが無難です。' });
+  }
+  if (!has('creatine')) {
+    r.push({ n: 'クレアチン', q: '5〜8g', why: '今日まだ摂っていません。高強度セットの反復を平均1〜2レップ押し上げる、最も再現性の高いサプリです。タイミングは不問で、毎日続けることが全てです。' });
+  }
+  if (!has('natto', 'yogurt', 'oikos', 'wakame')) {
+    r.push({ n: '納豆 / ヨーグルト', q: '1パック / 150g', why: '発酵食品と食物繊維がゼロです。腸内環境はタンパク質の利用効率に効きます。納豆はビタミンK2で骨密度、わかめはヨウ素と食物繊維を補えます。' });
+  }
+  if (P.key === 'recomp' && T.p > 0 && T.p < P.lbm * 2.2) {
+    r.push({ n: 'ギリシャヨーグルト（就寝前）', q: '150g', why: `リコンプ中はP ${n0(P.lbm * 2.2)}g（LBM×2.2）が下限。消化の遅いカゼインを寝る前に入れると、睡眠中の分解を抑えられます。` });
+  }
+  return r;
 }
 
 function advice(P, T, date) {
