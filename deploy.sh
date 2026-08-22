@@ -13,6 +13,7 @@ if ! gh auth status >/dev/null 2>&1; then
   gh auth login --web --git-protocol https
 fi
 
+gh auth setup-git >/dev/null 2>&1 || true
 USER=$(gh api user --jq .login)
 
 git init -q 2>/dev/null || true
