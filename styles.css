@@ -125,6 +125,11 @@ input.exname[data-custom="1"]{color:#cfe0ff}
   box-shadow:0 0 6px var(--ok)}
 .vchip.add{border-style:dashed;color:var(--dim)}
 
+/* pill の中に置くセレクト */
+select.bare{background:transparent;border:none;padding:0 2px;font-size:11.5px;font-weight:800;
+  color:inherit;box-shadow:none;height:auto;-webkit-appearance:none;appearance:none}
+select.bare:focus{box-shadow:none}
+
 /* 目標レップ（編集可） */
 .pill.tgt{gap:3px;padding-top:2px;padding-bottom:2px}
 .pill.tgt input{width:2.4em;text-align:center;background:transparent;border:1px solid transparent;

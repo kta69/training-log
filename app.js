@@ -110,6 +110,15 @@ function latestBody() {
   if (!S.body.length) return null;
   return [...S.body].sort((a, b) => b.date.localeCompare(a.date))[0];
 }
+const GOALS = { auto: '自動', recomp: 'リコンプ', cut: '減量', bulk: '増量', maint: '維持' };
+const MODE_LABEL = { recomp: 'リコンプ', cut: '減量', bulk: '増量', maint: '維持' };
+const MODE_WHY = {
+  recomp: '体重をほぼ据え置きにしたまま脂肪を落とし、その分を筋肉に置き換える方針。維持カロリーのすぐ下（−5%前後）に留め、タンパク質を高く保ちます。',
+  cut: '増やす除脂肪量より落とす脂肪量が大きいので、まず脂肪を削る方針です。',
+  bulk: '目標体重までまだ余裕があるので、維持カロリー＋αで除脂肪量を増やす方針です。',
+  maint: '現状と目標がほぼ一致しているため、維持カロリーで体組成をキープします。'
+};
+
 function plan() {
   const st = S.settings, b = latestBody();
   const w = b ? b.weight : st.targetW;
@@ -120,19 +129,30 @@ function plan() {
   const targetFatMass = st.targetW * st.targetBf / 100;
   const fatDelta = w * bf / 100 - targetFatMass;      // >0 → 落とす脂肪量
   const lbmDelta = (st.targetW - targetFatMass) - lbm; // >0 → 増やす除脂肪量
-  let mode, kcal, deficit = 0;
-  if (fatDelta > 1) {
-    mode = '減量';
-    deficit = Math.min(w * 0.005 * 7700 / 7, tdee * 0.22);
-    kcal = tdee - deficit;
-  } else if (st.targetW - w > 1) {
-    mode = '増量'; kcal = tdee + 280;
-  } else { mode = '維持'; kcal = tdee; }
-  const p = lbm * (mode === '減量' ? 2.4 : 2.0);
+
+  const auto = !st.goal || st.goal === 'auto';
+  let key = auto ? null : st.goal;
+  if (!key) {
+    // 脂肪も落としたいが除脂肪も増やしたい＝体重据え置き → リコンプ
+    if (fatDelta > 1 && lbmDelta > 1) key = 'recomp';
+    else if (fatDelta > 1) key = 'cut';
+    else if (st.targetW - w > 1) key = 'bulk';
+    else key = 'maint';
+  }
+  let kcal, deficit = 0, pk;
+  if (key === 'cut') {
+    deficit = Math.min(w * 0.005 * 7700 / 7, tdee * 0.22); kcal = tdee - deficit; pk = 2.4;
+  } else if (key === 'recomp') {
+    deficit = Math.min(tdee * 0.06, 180); kcal = tdee - deficit; pk = 2.6;
+  } else if (key === 'bulk') {
+    kcal = tdee + 280; pk = 2.2;
+  } else { kcal = tdee; pk = 2.2; }
+  const p = lbm * pk;
   const f = Math.max(kcal * 0.22 / 9, lbm * 0.7);
   const c = Math.max(0, (kcal - p * 4 - f * 9) / 4);
-  const weeks = deficit > 0 ? fatDelta * 7700 / (deficit * 7) : null;
-  return { w, bf, lbm, bmr, tdee, mode, kcal, p, f, c, fatDelta, lbmDelta, weeks, hasBody: !!b };
+  const weeks = deficit > 0 && fatDelta > 0 ? fatDelta * 7700 / (deficit * 7) : null;
+  return { w, bf, lbm, bmr, tdee, key, mode: MODE_LABEL[key], why: MODE_WHY[key], auto,
+    kcal, p, f, c, deficit, fatDelta, lbmDelta, weeks, hasBody: !!b };
 }
 function foodMacros(fid, g) {
   const F = FOODS[fid]; if (!F) return { kcal: 0, p: 0, f: 0, c: 0 };
@@ -495,7 +515,13 @@ function viewNutrition(el) {
       <div class="row between"><span class="mut">目標</span><b class="mono">${n1(S.settings.targetW)} kg / ${n1(S.settings.targetBf)} %</b></div>
       <div class="row between"><span class="mut">落とす脂肪 / 増やす除脂肪</span><b class="mono">${n1(P.fatDelta)} kg / ${P.lbmDelta >= 0 ? '+' : ''}${n1(P.lbmDelta)} kg</b></div>
       ${P.weeks ? `<div class="row between"><span class="mut">推定期間</span><b class="mono">約 ${n0(P.weeks)} 週</b></div>` : ''}
-      <div class="row between"><span class="mut">方針</span><b class="acc">${P.mode}</b></div>
+      <div class="hr"></div>
+      <div class="row between" style="margin-bottom:6px">
+        <span class="mut">方針</span>
+        <label class="pill acc"><select id="goal" class="bare">${Object.entries(GOALS).map(([k, l]) =>
+          `<option value="${k}" ${(S.settings.goal || 'auto') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      </div>
+      <div class="xs mut">${P.auto ? `自動判定 → <b class="acc">${P.mode}</b>。` : ''}${P.why}</div>
     </div>
 
     <h2 class="sec">${esc(CURRY_RECIPE.n)}</h2>
@@ -521,6 +547,7 @@ function viewNutrition(el) {
   });
   el.querySelectorAll('[data-mi]').forEach(i => i.onblur = () => render());
   el.querySelectorAll('[data-mdel]').forEach(b => b.onclick = () => { S.meals[date].splice(+b.dataset.mdel, 1); save(); render(); });
+  el.querySelector('#goal').onchange = e => { S.settings.goal = e.target.value; save(); render(); };
   const c = el.querySelector('#clr');
   if (c) c.onclick = () => { delete S.meals[date]; save(); render(); };
 }
@@ -542,8 +569,9 @@ function advice(P, T, date) {
   if (dC < -45) a.push({ k: 'warn', t: `糖質が ${n0(-dC)}g 不足。さつまいも ${n0(-dC / 0.319)}g、または米（生）${n0(-dC / 0.771)}g を追加。特にトレ前後2時間に寄せると Day2・Day4 の高重量スクワットで効きます。` });
   else if (dC > 60) a.push({ k: '', t: `糖質が ${n0(dC)}g オーバー。減量が停滞するなら、まず夜の米 1合→0.7合（-45g）から削るのが体感の少ない削り方です。` });
 
+  if (P.key === 'recomp') a.push({ k: '', t: `リコンプ中は体重ではなく <b>挙上重量の伸び</b> が指標です。週あたりの体重減が 0.2kg を超えて続くなら +150kcal、4週間 e1RM が伸びないなら −150kcal で微調整してください。` });
   if (Math.abs(dK) <= P.kcal * 0.05) a.push({ k: 'ok', t: `総カロリー <b>${n0(T.kcal)} kcal</b>（目標 ±5%以内）。この配分を維持してください。` });
-  else if (dK > 0) a.push({ k: dK > P.kcal * .15 ? 'bad' : 'warn', t: `${n0(dK)} kcal オーバー。${P.mode === '減量' ? '週あたりの脂肪減が ' + n1(dK * 7 / 7700) + 'kg 目減りします。' : ''}` });
+  else if (dK > 0) a.push({ k: dK > P.kcal * .15 ? 'bad' : 'warn', t: `${n0(dK)} kcal オーバー。${P.deficit > 0 ? '週あたりの脂肪減が ' + n1(dK * 7 / 7700) + 'kg 目減りします。' : ''}` });
   else a.push({ k: dK < -P.kcal * .18 ? 'bad' : 'warn', t: `${n0(-dK)} kcal 不足。過度な赤字は除脂肪量の減少とパフォーマンス低下を招きます。糖質で埋めてください。` });
 
   a.push({ k: '', t: `<b>タイミング</b>：クレアチン8gは毎日（タイミング不問・継続が全て）。トレ中の粉ポカリ（C 62g）は Day2/Day4 のような高強度日に有効。就寝前は消化の遅いタンパク質（ヨーグルト・カゼイン）が回復に効きます。` });
