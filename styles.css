@@ -121,10 +121,15 @@ input.exname[data-custom="1"]{color:#cfe0ff}
   background:var(--bg3);border:1px solid var(--line);border-radius:999px;padding:6px 13px;
   font-size:12px;font-weight:700;color:var(--mut);white-space:nowrap;transition:.16s}
 .vchip:active{transform:scale(.94);background:rgba(91,149,255,.2);border-color:rgba(120,150,255,.55);color:#dce8ff}
-.vchip i.alt{font-style:normal;font-size:9px;font-weight:800;letter-spacing:.05em;color:var(--dim);
-  background:rgba(255,255,255,.07);border-radius:4px;padding:1px 4px}
 .vchip i.dot{width:5px;height:5px;border-radius:50%;background:var(--ok);flex:0 0 auto;
   box-shadow:0 0 6px var(--ok)}
+.vchip.add{border-style:dashed;color:var(--dim)}
+
+/* 目標レップ（編集可） */
+.pill.tgt{gap:3px;padding-top:2px;padding-bottom:2px}
+.pill.tgt input{width:2.4em;text-align:center;background:transparent;border:1px solid transparent;
+  border-radius:6px;padding:2px 0;font-size:12px;font-weight:800;color:var(--fg);box-shadow:none}
+.pill.tgt input:focus{background:var(--bg);border-color:var(--acc);box-shadow:0 0 0 3px rgba(91,149,255,.16)}
 .addset{margin-top:9px;width:100%}
 
 .warmup{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}

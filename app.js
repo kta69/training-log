@@ -23,6 +23,8 @@ function defaults() {
     meals: {},
     names: {},
     pick: {},
+    alts: {},
+    targets: {},
     tab: 'workout',
     day: 'day1',
     mealDate: null,
@@ -87,6 +89,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 /* ============ セッション ============ */
 const logDate = () => S.logDate || today();
 const exName = it => S.names[it.id] || it.name;
+const nameOf = id => S.names[id] || (EX_MAP[id] ? EX_MAP[id].name : id);
 
 function currentSession(dayId) {
   return S.sessions.find(s => s.date === logDate() && s.day === dayId && !s.done);
@@ -249,6 +252,12 @@ function renderExList(host, day, sess) {
       nm.dataset.custom = S.names[id] ? '1' : '';
       save(); return;
     }
+    const tg = e.target.closest('input[data-tgt]');
+    if (tg) {
+      const id = tg.dataset.tgt, v = parseInt(tg.value, 10);
+      if (!isFinite(v) || v < 0) delete S.targets[id]; else S.targets[id] = v;
+      save(); return;
+    }
     const inp = e.target.closest('input[data-ex]'); if (!inp) return;
     const first = !sess; need();
     const { ex, i, k } = inp.dataset;
@@ -261,19 +270,43 @@ function renderExList(host, day, sess) {
   });
   host.addEventListener('focusout', e => {
     const nm = e.target.closest('input[data-name]');
-    if (nm && !nm.value.trim()) nm.value = (EX_MAP[nm.dataset.name] || {}).name || '';
+    if (nm && !nm.value.trim()) nm.value = (EX_MAP[nm.dataset.name] || {}).name || '新しい種目';
   });
+  const redrawCard = (node, mainId) => {
+    const scroll = window.scrollY;
+    node.outerHTML = exCard(EX_MAP[mainId], sess);
+    window.scrollTo(0, scroll);
+    if (sess) updateDelta(activeVar(EX_MAP[mainId]).id, sess);
+  };
   host.addEventListener('click', e => {
     const pk = e.target.closest('[data-pick]');
     if (pk) {
       const [mainId, exId] = pk.dataset.pick.split(':');
       if (exId === mainId) delete S.pick[mainId]; else S.pick[mainId] = exId;
       save();
-      const card = pk.closest('.card.ex');
-      const scroll = window.scrollY;
-      card.outerHTML = exCard(EX_MAP[mainId], sess);
-      window.scrollTo(0, scroll);
-      if (sess) updateDelta(activeVar(EX_MAP[mainId]).id, sess);
+      redrawCard(pk.closest('.card.ex'), mainId);
+      return;
+    }
+    const na = e.target.closest('[data-newalt]');
+    if (na) {
+      const mainId = na.dataset.newalt, id = 'u' + uid();
+      (S.alts[mainId] || (S.alts[mainId] = [])).push(id);
+      S.pick[mainId] = id;
+      save();
+      const card = na.closest('.card.ex');
+      redrawCard(card, mainId);
+      const inp = host.querySelector(`input[data-name="${id}"]`);
+      if (inp) { inp.focus(); inp.select(); }
+      return;
+    }
+    const da = e.target.closest('[data-delalt]');
+    if (da) {
+      const [mainId, exId] = da.dataset.delalt.split(':');
+      S.alts[mainId] = (S.alts[mainId] || []).filter(x => x !== exId);
+      delete S.names[exId]; delete S.targets[exId]; delete S.pick[mainId];
+      if (sess) delete sess.logs[exId];
+      save();
+      redrawCard(da.closest('.card.ex'), mainId);
       return;
     }
     const add = e.target.closest('[data-add]');
@@ -297,11 +330,18 @@ function renderExList(host, day, sess) {
   });
 }
 
-const variantsOf = main => [main, ...main.alts];
+/* 自分で追加した種目：id だけ保存し、名前は S.names、他の属性はメインを継承 */
+const userAlts = main => (S.alts[main.id] || []).map(id => ({
+  id, name: '新しい種目', user: true, target: main.target, each: main.each,
+  setting: '', video: main.video, bw: main.bw, sets: main.sets,
+  analyze: main.analyze, note: '', seed: [], alts: []
+}));
+const variantsOf = main => [main, ...main.alts, ...userAlts(main)];
 function activeVar(main) {
   const vs = variantsOf(main);
   return vs.find(v => v.id === S.pick[main.id]) || main;
 }
+const targetOf = it => S.targets[it.id] ?? it.target;
 
 function exCard(main, sess) {
   const vs = variantsOf(main);
@@ -315,20 +355,20 @@ function exCard(main, sess) {
 
   const pills = [
     it.setting ? `<span class="pill">${esc(it.setting)}</span>` : '',
-    it.target ? `<span class="pill">${it.target}${it.each ? 'e' : ''} reps</span>` : '',
+    `<label class="pill tgt">目標<input inputmode="numeric" data-tgt="${it.id}" value="${esc(targetOf(it) || '')}" placeholder="—">${it.each ? 'e' : ''}reps</label>`,
     it.note ? `<span class="pill">${esc(it.note)}</span>` : ''
   ].join('');
 
   const others = vs.filter(v => v.id !== it.id);
-  const swap = others.length ? `
+  const swap = `
     <div class="swap">
       <span class="swaplbl">切替</span>
       ${others.map(v => {
         const has = sess && sess.logs[v.id] && sess.logs[v.id].some(s => s.w || s.r);
-        return `<button class="vchip" data-pick="${main.id}:${v.id}">
-          <i class="alt">${v.id === main.id ? 'メイン' : '代替'}</i>${esc(exName(v))}${has ? '<i class="dot"></i>' : ''}</button>`;
+        return `<button class="vchip" data-pick="${main.id}:${v.id}">${esc(exName(v))}${has ? '<i class="dot"></i>' : ''}</button>`;
       }).join('')}
-    </div>` : '';
+      <button class="vchip add" data-newalt="${main.id}">＋ 種目</button>
+    </div>`;
 
   const prevHTML = `<div class="prev">
     ${b1 ? `<div class="prevbox"><span class="xs dim">前回 ${fmtDate(p1.date)}</span><br><b>${esc(setLabel(b1))}</b></div>` : `<div class="prevbox"><span class="xs dim">前回</span><br><b class="dim">—</b></div>`}
@@ -351,6 +391,7 @@ function exCard(main, sess) {
         <input class="exname" data-name="${it.id}" value="${esc(exName(it))}" placeholder="種目名"
           ${S.names[it.id] ? 'data-custom="1"' : ''}>
         <div class="row" style="gap:5px;margin-top:5px;flex-wrap:wrap">${pills}</div></div>
+      ${it.user ? `<button class="btn sm gho" data-delalt="${main.id}:${it.id}">削除</button>` : ''}
       ${it.analyze ? `<button class="btn sm gho" data-analyze="${it.analyze}">解析</button>` : ''}
     </div>
     ${swap}
@@ -542,7 +583,7 @@ function viewHistory(el) {
     <h2 class="sec">種目別 推定1RM</h2>
     <div class="card">
       <select id="hex" style="margin-bottom:10px">
-        ${PROGRAM.map(d => `<optgroup label="${d.name}">${d.items.flatMap(it => [it, ...it.alts]).map(it => `<option value="${it.id}" ${it.id === sel ? 'selected' : ''}>${esc(exName(it))}</option>`).join('')}</optgroup>`).join('')}
+        ${PROGRAM.map(d => `<optgroup label="${d.name}">${d.items.flatMap(variantsOf).map(it => `<option value="${it.id}" ${it.id === sel ? 'selected' : ''}>${esc(exName(it))}</option>`).join('')}</optgroup>`).join('')}
       </select>
       <canvas class="chart" id="c1"></canvas>
       ${recs.length >= 2 ? (() => {
@@ -562,7 +603,7 @@ function viewHistory(el) {
         <div class="row between"><div><b class="sm">${day ? day.name : s.day}</b> <span class="xs dim">${s.date} (${daysAgo(s.date)}日前)</span></div>
         <div class="row" style="gap:6px"><span class="pill">${n}種目</span>${s.done ? '' : '<span class="pill acc">進行中</span>'}
         <button class="btn sm gho" data-sdel="${s.id}">×</button></div></div>
-        <div class="xs mut" style="margin-top:6px">${Object.entries(s.logs).map(([k, v]) => { const b = bestOf(v); return b ? `${esc(EX_MAP[k] ? exName(EX_MAP[k]) : k)} ${esc(setLabel(b))}` : ''; }).filter(Boolean).join(' ／ ')}</div>
+        <div class="xs mut" style="margin-top:6px">${Object.entries(s.logs).map(([k, v]) => { const b = bestOf(v); return b ? `${esc(nameOf(k))} ${esc(setLabel(b))}` : ''; }).filter(Boolean).join(' ／ ')}</div>
       </div>`;
     }).join('') : '<div class="card sm dim">履歴なし</div>'}
   `;

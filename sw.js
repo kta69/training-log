@@ -1,5 +1,5 @@
-const CACHE = 'traininglog-v3';
-const SHELL = ['./', './index.html', './styles.css?v=3', './data.js?v=3', './app.js?v=3', './form.js?v=3', './body.js?v=3', './manifest.json', './icon.png'];
+const CACHE = 'traininglog-v4';
+const SHELL = ['./', './index.html', './styles.css?v=4', './data.js?v=4', './app.js?v=4', './form.js?v=4', './body.js?v=4', './manifest.json', './icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
