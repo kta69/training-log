@@ -62,6 +62,81 @@ function smooth(arr, k = 3) {
     return s / n;
   });
 }
+/* カメラの微小なドリフト（手ブレ・三脚のたわみ）を1次トレンドとして除去 */
+function detrend(sig) {
+  const n = sig.length; if (n < 6) return sig.slice();
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) { sx += i; sy += sig[i]; sxx += i * i; sxy += i * sig[i]; }
+  const b = (n * sxy - sx * sy) / ((n * sxx - sx * sx) || 1), a = (sy - b * sx) / n;
+  return sig.map((v, i) => v - (a + b * i));
+}
+/* 各関節座標を時間方向に平滑化（中央値3 → 移動平均3）。
+   ランドマークのジッタは体幹角の標準偏差やバットウィンク検出をそのまま汚染するため、
+   指標を計算する前に必ず通す。 */
+const JOINTS = ['ear', 'sh', 'el', 'wr', 'hip', 'kn', 'an'];
+function filterFrames(frames) {
+  const N = frames.length;
+  const out = frames.map(f => ({ t: f.t, nose: f.nose, world: f.world, L: {}, R: {} }));
+  ['L', 'R'].forEach(s => JOINTS.forEach(k => {
+    const put = (ax) => {
+      const raw = frames.map(f => f[s][k][ax]);
+      const med = raw.map((_, i) => {
+        const a = [raw[Math.max(0, i - 1)], raw[i], raw[Math.min(N - 1, i + 1)]].sort((p, q) => p - q);
+        return a[1];
+      });
+      med.forEach((_, i) => {
+        let sum = 0, n = 0;
+        for (let j = Math.max(0, i - 1); j <= Math.min(N - 1, i + 1); j++) { sum += med[j]; n++; }
+        (out[i][s][k] = out[i][s][k] || {})[ax] = sum / n;
+      });
+    };
+    put('x'); put('y');
+    frames.forEach((f, i) => { out[i][s][k].v = f[s][k].v; });
+  }));
+  return out;
+}
+
+/* 真横からのズレ（鉛直軸まわりの回転）。真横なら肩ラインは奥行き方向を向く。
+   ズレ θ があると画像上の水平距離だけが cosθ 倍に縮むので、後で割り戻して補正する。 */
+function obliquity(frames) {
+  const a = frames.map(f => f.world).filter(w => w && w[SH.L] && w[SH.R]).map(w => {
+    const dx = Math.abs(w[SH.R].x - w[SH.L].x), dz = Math.abs(w[SH.R].z - w[SH.L].z);
+    return Math.atan2(dx, dz) * D;
+  }).sort((p, q) => p - q);
+  return a.length ? a[Math.floor(a.length / 2)] : 0;
+}
+/* 水平成分を 1/cosθ 倍して、矢状面での本来の座標に戻す */
+function deskew(frames, theta) {
+  const k = 1 / Math.cos(clamp(theta, 0, 38) * Math.PI / 180);
+  if (k < 1.01) return frames;
+  return frames.map(f => {
+    const cx = (f.L.hip.x + f.R.hip.x) / 2;
+    const fix = p => ({ ...p, x: cx + (p.x - cx) * k });
+    const o = { t: f.t, nose: fix(f.nose), world: f.world, L: {}, R: {} };
+    ['L', 'R'].forEach(s => JOINTS.forEach(j => { o[s][j] = fix(f[s][j]); }));
+    return o;
+  });
+}
+
+/* 実寸スケール。投影は分節長を縮めることしかしないので「観測された最大長」を真の長さとみなす。
+   複数の分節から個別に推定し、中央値を採る（前腕1本に頼ると回内・短縮で大きく外す）。 */
+const SEG = [
+  { a: 'el', b: 'wr', r: 0.146 },   // 前腕
+  { a: 'kn', b: 'an', r: 0.246 },   // 下腿
+  { a: 'hip', b: 'kn', r: 0.245 },  // 大腿
+  { a: 'sh', b: 'el', r: 0.186 }    // 上腕
+];
+function cmPerPxOf(F, heightCm) {
+  const est = SEG.map(s => {
+    const ok = F.filter(f => (f.j[s.a].v ?? 1) > 0.6 && (f.j[s.b].v ?? 1) > 0.6);
+    if (ok.length < 5) return null;
+    const L = ok.map(f => dist(f.j[s.a], f.j[s.b])).sort((p, q) => p - q);
+    const p95 = L[Math.min(L.length - 1, Math.floor(L.length * 0.95))];
+    return p95 > 0 ? (heightCm * s.r) / p95 : null;
+  }).filter(v => v && isFinite(v) && v > 0).sort((a, b) => a - b);
+  if (!est.length) return null;
+  return est.length % 2 ? est[(est.length - 1) / 2] : (est[est.length / 2 - 1] + est[est.length / 2]) / 2;
+}
 /* ピーク検出（プロミネンス方式：手ブレ由来の微小な山を除去） */
 function peaks(sig, minSepIdx) {
   const range = Math.max(...sig) - Math.min(...sig);
@@ -105,42 +180,96 @@ async function getLandmarker(onStatus) {
 function seekTo(video, t) {
   return new Promise(res => {
     let done = false;
-    const h = () => { if (done) return; done = true; video.removeEventListener('seeked', h); res(); };
+    const h = () => {
+      if (done) return; done = true;
+      video.removeEventListener('seeked', h);
+      // seeked が来てもフレームがまだ描画されていないことがあるので1度描画を待つ
+      requestAnimationFrame(() => requestAnimationFrame(res));
+    };
     video.addEventListener('seeked', h);
     video.currentTime = t;
     setTimeout(h, 900);
   });
 }
 
-async function extract(video, onProgress, onStatus) {
-  const lm = await getLandmarker(onStatus);
-  const W = video.videoWidth, H = video.videoHeight;
+async function durationOf(video) {
   let dur = video.duration;
   if (!isFinite(dur) || dur <= 0) {           // 一部の録画形式では duration が取れない
     video.currentTime = 1e6;
     await new Promise(r => { const h = () => { video.removeEventListener('seeked', h); r(); }; video.addEventListener('seeked', h); setTimeout(h, 1200); });
     dur = isFinite(video.duration) && video.duration > 0 ? video.duration : video.currentTime || 10;
+    video.currentTime = 0;
   }
-  dur = Math.min(dur, 30);
-  const step = Math.max(1 / 12, dur / 260);
+  return Math.min(dur, 30);
+}
+
+function grab(p, W, H, t, world) {
+  const pt = i => ({ x: p[i].x * W, y: p[i].y * H, v: p[i].visibility ?? 1 });
+  return {
+    t, world, nose: pt(NOSE),
+    L: { ear: pt(EAR.L), sh: pt(SH.L), el: pt(EL.L), wr: pt(WR.L), hip: pt(HIP.L), kn: pt(KN.L), an: pt(AN.L) },
+    R: { ear: pt(EAR.R), sh: pt(SH.R), el: pt(EL.R), wr: pt(WR.R), hip: pt(HIP.R), kn: pt(KN.R), an: pt(AN.R) }
+  };
+}
+
+/* 再生しながら実フレームを拾う。シーク方式より圧倒的に速く、
+   フレームレートも動画本来のものに近づくのでテンポ計測の分解能が上がる。 */
+function extractByPlayback(video, lm, dur, W, H, onProgress) {
+  return new Promise((resolve, reject) => {
+    const frames = [];
+    let last = -1, stalls = 0;
+    // 1フレームあたり 20〜40ms の推論が要るので、取りこぼさないよう再生速度を落とす
+    video.playbackRate = dur > 12 ? 1 : 0.5;
+    const step = (now, meta) => {
+      const t = meta.mediaTime;
+      if (t > last + 1e-4) {
+        last = t;
+        try {
+          const res = lm.detectForVideo(video, Math.round(t * 1000));
+          const p = res.landmarks && res.landmarks[0];
+          if (p) frames.push(grab(p, W, H, t, (res.worldLandmarks || [])[0]));
+        } catch (e) { stalls++; }
+      }
+      onProgress(Math.min(1, t / dur));
+      if (video.ended || t >= dur - 0.02 || stalls > 30 || frames.length > 900) { video.pause(); resolve(frames); }
+      else video.requestVideoFrameCallback(step);
+    };
+    video.requestVideoFrameCallback(step);
+    video.play().catch(reject);
+    setTimeout(() => { video.pause(); resolve(frames); }, 60000);
+  });
+}
+
+/* rVFC が使えない環境向けのシーク方式 */
+async function extractBySeek(video, lm, dur, W, H, onProgress) {
   const frames = [];
-  onStatus('関節を検出中…');
+  const step = Math.max(1 / 15, dur / 300);
   for (let t = 0; t < dur - 0.02; t += step) {
     await seekTo(video, t);
     let res;
     try { res = lm.detectForVideo(video, Math.round(t * 1000)); } catch (e) { continue; }
     const p = res.landmarks && res.landmarks[0];
-    if (!p) { onProgress(t / dur); continue; }
-    const pt = i => ({ x: p[i].x * W, y: p[i].y * H, v: p[i].visibility ?? 1 });
-    frames.push({
-      t,
-      nose: pt(NOSE),
-      L: { ear: pt(EAR.L), sh: pt(SH.L), el: pt(EL.L), wr: pt(WR.L), hip: pt(HIP.L), kn: pt(KN.L), an: pt(AN.L) },
-      R: { ear: pt(EAR.R), sh: pt(SH.R), el: pt(EL.R), wr: pt(WR.R), hip: pt(HIP.R), kn: pt(KN.R), an: pt(AN.R) }
-    });
+    if (p) frames.push(grab(p, W, H, t, (res.worldLandmarks || [])[0]));
     onProgress(t / dur);
   }
-  return { frames, W, H };
+  return frames;
+}
+
+async function extract(video, onProgress, onStatus) {
+  const lm = await getLandmarker(onStatus);
+  const W = video.videoWidth, H = video.videoHeight;
+  const dur = await durationOf(video);
+  onStatus('関節を検出中…');
+  const canRVFC = typeof video.requestVideoFrameCallback === 'function';
+  let frames = [];
+  if (canRVFC) {
+    try { frames = await extractByPlayback(video, lm, dur, W, H, onProgress); } catch (e) { frames = []; }
+  }
+  if (frames.length < 12) {                    // 再生が阻まれた場合はシークで取り直す
+    video.pause(); video.playbackRate = 1;
+    frames = await extractBySeek(video, lm, dur, W, H, onProgress);
+  }
+  return { frames, W, H, fps: frames.length > 1 ? (frames.length - 1) / (frames[frames.length - 1].t - frames[0].t) : 0 };
 }
 
 /* ---------- 指標算出 ---------- */
@@ -166,7 +295,19 @@ function perFrame(f, s) {
 const M = (n, v, unit, status, hint, ideal) => ({ n, v, unit, status, hint, ideal });
 const st3 = (v, good, warn) => Math.abs(v) <= good ? 'ok' : Math.abs(v) <= warn ? 'warn' : 'bad';
 
-function analyze(type, frames, heightCm) {
+function analyze(type, rawFrames, heightCm, fps) {
+  // ① 追跡が破綻したフレームを落とす（主要関節が見えていないコマは指標を汚すだけ）
+  const conf = f => mean(['sh', 'el', 'wr', 'hip', 'kn'].map(k => Math.max(f.L[k].v, f.R[k].v)));
+  let frames = rawFrames.filter(f => conf(f) > 0.5);
+  if (frames.length < 8) frames = rawFrames;
+  const dropped = rawFrames.length - frames.length;
+
+  // ② 時間方向の平滑化 → ③ 斜め撮りの補正（水平成分を 1/cosθ 倍して矢状面に戻す）
+  frames = filterFrames(frames);
+  const drawFrames = frames;                 // 描画は補正前（映像の座標系）を使う
+  const skew = obliquity(frames);
+  frames = deskew(frames, skew);
+
   // 撮影側の判定（見えている側）
   const vis = s => mean(frames.map(f => mean(['sh', 'el', 'wr', 'hip', 'kn'].map(k => f[s][k].v))));
   const side = vis('L') >= vis('R') ? 'L' : 'R';
@@ -174,9 +315,8 @@ function analyze(type, frames, heightCm) {
   const Fo = frames.map(f => perFrame(f, side === 'L' ? 'R' : 'L'));
   const facing = Math.sign(mean(frames.map(f => f.nose.x - f[side].hip.x))) || 1;
 
-  // 実寸スケール: 前腕長 ≒ 身長 × 0.146
-  const foreLenPx = mean(F.map(f => dist(f.j.el, f.j.wr)));
-  const cmPerPx = (heightCm * 0.146) / (foreLenPx || 1);
+  // 実寸スケール: 複数分節の観測最大長から中央値で決める
+  const cmPerPx = cmPerPxOf(F, heightCm) || (heightCm * 0.146) / (mean(F.map(f => dist(f.j.el, f.j.wr))) || 1);
 
   // レップ信号
   const sigOf = {
@@ -189,8 +329,9 @@ function analyze(type, frames, heightCm) {
     squat: F.map(f => f.hipY),
     hinge: F.map(f => f.shY)
   }[type];
-  const sig = smooth(sigOf, 2);
   const dt = (F[F.length - 1].t - F[0].t) / Math.max(1, F.length - 1);
+  // 平滑化の窓は「時間」で決める（フレームレートが変わっても挙動を揃えるため）
+  const sig = detrend(smooth(sigOf, clamp(Math.round(0.09 / dt), 1, 6)));
   const pk = peaks(sig, Math.max(3, Math.round(0.55 / dt)));
   const keys = pk.length ? pk : [sig.indexOf(Math.max(...sig))];
   const reps = keys.length;
@@ -339,16 +480,17 @@ function analyze(type, frames, heightCm) {
     push('ボトム体幹前傾角', trunkB, '°', trunkB <= 45 ? 'ok' : trunkB <= 58 ? 'warn' : 'bad',
       trunkB > 50 ? 'グッドモーニング化：脊柱起立筋への負担大' : 'ハイバーとして適正', '30〜45°');
 
-    // バットウィンク: ボトム近傍での体幹角の急変
+    // バットウィンク: ボトム近傍での体幹角の急変（フレームレートに依らないよう °/秒 で見る）
+    const wSpan = Math.max(2, Math.round(0.12 / dt));
     const wink = mean(segs.map(s => {
-      const w = 3, a = Math.max(s.start, s.key - w), b = Math.min(s.end, s.key + w);
+      const a = Math.max(s.start, s.key - wSpan), b = Math.min(s.end, s.key + wSpan);
       const seq = F.slice(a, b + 1).map(f => Math.abs(f.trunk));
       let mx = 0;
-      for (let i = 1; i < seq.length; i++) mx = Math.max(mx, seq[i] - seq[i - 1]);
+      for (let i = 1; i < seq.length; i++) mx = Math.max(mx, (seq[i] - seq[i - 1]) / dt);
       return mx;
     }));
-    push('バットウィンク疑い', wink, '°/frame', st3(wink, 2.5, 5),
-      wink > 2.5 ? 'ボトム直前で体幹角が急変＝骨盤後傾／腰椎屈曲の可能性' : '滑らかに切り返せています', '≦2.5°');
+    push('バットウィンク疑い', wink, '°/秒', st3(wink, 25, 50),
+      wink > 25 ? 'ボトム直前で体幹角が急変＝骨盤後傾／腰椎屈曲の可能性' : '滑らかに切り返せています', '≦25°/秒');
 
     const barShift = mean(K.map(f => Math.abs(f.j.sh.x - f.j.an.x) * cmPerPx));
     push('重心（肩↔足首の水平差）', barShift, 'cm', barShift <= 4 ? 'ok' : barShift <= 8 ? 'warn' : 'bad',
@@ -359,7 +501,7 @@ function analyze(type, frames, heightCm) {
     push('下降時間（平均）', tem, '秒', tem >= 1.2 ? 'ok' : tem >= 0.8 ? 'warn' : 'bad', '落下でなくコントロール', '≧1.2秒');
 
     if (hipBelowKnee < 0) adv.push({ k: 'warn', t: `<b>深さ</b>：股関節が膝より ${Math.abs(hipBelowKnee).toFixed(1)}%（体幹長比）高い位置で切り返しています。147.5kg×4 の記録を伸ばす前に、まず深さを一定にした方が指標として意味を持ちます。足関節背屈が制限ならリフティングシューズかヒール、股関節ならスタンスを2〜3cm広げて爪先を5°外に。` });
-    if (wink > 2.5) adv.push({ k: wink > 5 ? 'bad' : 'warn', t: `<b>バットウィンク</b>：ボトム直前で体幹角が急に ${wink.toFixed(1)}°/frame 変化しています。骨盤後傾＝腰椎屈曲が高負荷下で起きると椎間板への剪断が増えます。ウォームアップの梨状筋ストレッチ・Clam Shell は継続しつつ、<b>急変が始まる直前の深さ</b>を当面のボトムに設定してください。` });
+    if (wink > 25) adv.push({ k: wink > 50 ? 'bad' : 'warn', t: `<b>バットウィンク</b>：ボトム直前で体幹角が ${wink.toFixed(0)}°/秒 の速さで急変しています。骨盤後傾＝腰椎屈曲が高負荷下で起きると椎間板への剪断が増えます。ウォームアップの梨状筋ストレッチ・Clam Shell は継続しつつ、<b>急変が始まる直前の深さ</b>を当面のボトムに設定してください。` });
     if (trunkB > 50) adv.push({ k: 'warn', t: `<b>体幹角 ${trunkB.toFixed(0)}°</b>：前傾が強く、大腿四頭筋よりも股関節伸展筋・脊柱起立筋への依存が大きい状態です。Day4 の Pendulum SQ / Hack SQ で四頭の絶対的な強さを上げると、Back SQ の前傾も自然に減ります。` });
   }
 
@@ -387,13 +529,23 @@ function analyze(type, frames, heightCm) {
   const tEcc = mean(tempo.map(t => t.ecc)), tCon = mean(tempo.map(t => t.con));
   const score = Math.round(100 - ms.reduce((a, m) => a + (m.status === 'bad' ? 16 : m.status === 'warn' ? 7 : 0), 0));
 
+  // 計測品質（この数値をどこまで信じてよいか）
+  const meanVis = mean(F.map(f => mean(JOINTS.map(k => f.j[k].v ?? 1))));
+  const qNotes = [];
+  if (skew > 22) qNotes.push({ k: 'bad', t: `カメラが真横から <b>${skew.toFixed(0)}°</b> ずれています。水平成分を補正していますが、この角度では前腕角・バー軌道の誤差が大きくなります。三脚を動作面と垂直に置き直してください。` });
+  else if (skew > 10) qNotes.push({ k: 'warn', t: `カメラが真横から ${skew.toFixed(0)}° ずれています（補正済み）。真横なら更に精度が上がります。` });
+  if (meanVis < 0.75) qNotes.push({ k: 'warn', t: `関節の平均可視度が ${(meanVis * 100).toFixed(0)}% と低めです。ラックの支柱やプレートで関節が隠れていないか、明るさが足りているか確認してください。` });
+  if (fps && fps < 14) qNotes.push({ k: 'warn', t: `解析フレームレートが ${fps.toFixed(0)}fps しかなく、テンポと切り返しの分解能が粗くなっています。動画を10秒以内に短くすると上がります。` });
+  if (reps < 2) qNotes.push({ k: 'warn', t: 'レップが1回しか検出されていません。2〜3レップ撮ると、レップ間のばらつきまで評価できます。' });
+
   return {
     side: side === 'L' ? '左（手前）' : '右（手前）',
     reps, tEcc, tCon, score: clamp(score, 0, 100),
-    metrics: ms, advices: adv,
+    metrics: ms, advices: adv, qNotes,
+    quality: { skew, meanVis, fps: fps || 1 / dt, frames: F.length, dropped, cmPerPx },
     keyIdx: keys[Math.floor(keys.length / 2)],
     series: F.map((f, i) => ({ label: f.t.toFixed(1), v: sig[i] })),
-    frames: F, sig
+    frames: F, drawFrames, sig
   };
 }
 
@@ -405,10 +557,10 @@ function drawSkeleton(cv, frame, W, H) {
   x.clearRect(0, 0, W, H);
   ['R', 'L'].forEach(s => {
     const j = frame[s], main = s === (frame._side || 'L');
-    x.strokeStyle = main ? '#4d8dff' : 'rgba(140,150,170,.45)';
+    x.strokeStyle = main ? '#d8ff45' : 'rgba(140,148,161,.4)';
     x.lineWidth = Math.max(2, W / 260); x.lineCap = 'round';
     BONES.forEach(([a, b]) => { x.beginPath(); x.moveTo(j[a].x, j[a].y); x.lineTo(j[b].x, j[b].y); x.stroke(); });
-    x.fillStyle = main ? '#31d0a5' : 'rgba(140,150,170,.5)';
+    x.fillStyle = main ? '#3ddc97' : 'rgba(140,148,161,.45)';
     Object.values(j).forEach(p => { x.beginPath(); x.arc(p.x, p.y, Math.max(3, W / 190), 0, 7); x.fill(); });
   });
 }
@@ -478,7 +630,7 @@ function render(el) {
       const v = stage.querySelector('video');
       v.src = state.raw.url;
       v.onloadeddata = () => {
-        const f = state.raw.frames[r.keyIdx];
+        const f = r.drawFrames[r.keyIdx];
         v.currentTime = f ? f.t : 0;
         if (f) { f._side = r.side.startsWith('左') ? 'L' : 'R'; drawSkeleton(stage.querySelector('canvas'), f, state.raw.W, state.raw.H); }
       };
@@ -514,6 +666,19 @@ function resultHTML(r) {
 
     <h2 class="sec">バイオメカニクス評価</h2>
     ${r.advices.map(a => `<div class="advice ${a.k}">${a.t}</div>`).join('')}
+
+    <h2 class="sec">計測品質</h2>
+    <div class="card">
+      <div class="macro4">
+        <div><b>${r.quality.skew.toFixed(0)}<span style="font-size:11px">°</span></b><span>カメラ角ズレ</span></div>
+        <div><b>${(r.quality.meanVis * 100).toFixed(0)}<span style="font-size:11px">%</span></b><span>関節可視度</span></div>
+        <div><b>${r.quality.fps.toFixed(0)}</b><span>解析 FPS</span></div>
+        <div><b>${r.quality.frames}</b><span>採用フレーム</span></div>
+      </div>
+      ${r.qNotes.length
+        ? r.qNotes.map(a => `<div class="advice ${a.k}" style="margin-top:9px">${a.t}</div>`).join('')
+        : `<div class="advice ok" style="margin-top:9px">撮影条件は良好です。この条件を再現できれば、次回との比較がそのまま実力差として読めます。</div>`}
+    </div>
   `;
 }
 
@@ -524,10 +689,10 @@ function drawSeries(cv, r) {
   const s = r.sig, mn = Math.min(...s), mx = Math.max(...s);
   const X = i => 4 + (w - 8) * i / (s.length - 1 || 1);
   const Y = v => 8 + (h - 16) * (1 - (v - mn) / ((mx - mn) || 1));
-  x.strokeStyle = '#4d8dff'; x.lineWidth = 2; x.beginPath();
+  x.strokeStyle = '#d8ff45'; x.lineWidth = 2; x.beginPath();
   s.forEach((v, i) => i ? x.lineTo(X(i), Y(v)) : x.moveTo(X(i), Y(v)));
   x.stroke();
-  x.fillStyle = '#31d0a5';
+  x.fillStyle = '#3ddc97';
   x.beginPath(); x.arc(X(r.keyIdx), Y(s[r.keyIdx]), 4, 0, 7); x.fill();
 }
 
@@ -543,13 +708,13 @@ async function run(el, file) {
       v.onloadeddata = res; v.onerror = () => rej(new Error('動画を読み込めませんでした'));
       setTimeout(() => rej(new Error('読み込みタイムアウト')), 20000);
     });
-    const { frames, W, H } = await extract(v,
+    const { frames, W, H, fps } = await extract(v,
       p => { state.prog = p; const b = el.querySelector('.bar > i'); if (b) b.style.width = Math.round(p * 100) + '%'; },
       m => { state.msg = m; render(el); });
     if (frames.length < 8) throw new Error('人物を検出できたフレームが足りません。全身が映るよう、明るい場所で撮り直してください。');
     state.msg = '指標を計算中…'; render(el);
     const heightCm = (JSON.parse(localStorage.getItem('gymlog_v1') || '{}').settings || {}).height || 172;
-    const r = analyze(state.type, frames, heightCm);
+    const r = analyze(state.type, frames, heightCm, fps);
     state.raw = { url, frames, W, H };
     state.result = r;
     const hist = JSON.parse(localStorage.getItem('gymform_v1') || '[]');

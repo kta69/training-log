@@ -186,7 +186,7 @@ function chart(cv, pts, color) {
   cv.width = w * dpr; cv.height = h * dpr;
   const x = cv.getContext('2d'); x.scale(dpr, dpr);
   x.clearRect(0, 0, w, h);
-  if (pts.length < 1) { x.fillStyle = '#5d6678'; x.font = '12px sans-serif'; x.fillText('データなし', 8, 20); return; }
+  if (pts.length < 1) { x.fillStyle = '#5a616d'; x.font = '12px sans-serif'; x.fillText('データなし', 8, 20); return; }
   const vals = pts.map(p => p.v);
   let mn = Math.min(...vals), mx = Math.max(...vals);
   if (mx - mn < 1e-6) { mn -= 1; mx += 1; }
@@ -194,18 +194,18 @@ function chart(cv, pts, color) {
   const PL = 34, PR = 8, PT = 12, PB = 20;
   const X = i => PL + (w - PL - PR) * (pts.length === 1 ? .5 : i / (pts.length - 1));
   const Y = v => PT + (h - PT - PB) * (1 - (v - mn) / (mx - mn));
-  x.strokeStyle = '#262d3a'; x.lineWidth = 1; x.font = '9px sans-serif'; x.fillStyle = '#5d6678';
+  x.strokeStyle = '#22262f'; x.lineWidth = 1; x.font = '9px sans-serif'; x.fillStyle = '#5a616d';
   for (let i = 0; i <= 2; i++) {
     const v = mn + (mx - mn) * i / 2, y = Y(v);
     x.beginPath(); x.moveTo(PL, y); x.lineTo(w - PR, y); x.stroke();
     x.fillText(n1(v).toString(), 2, y + 3);
   }
-  x.strokeStyle = color || '#4d8dff'; x.lineWidth = 2; x.beginPath();
+  x.strokeStyle = color || '#d8ff45'; x.lineWidth = 2; x.beginPath();
   pts.forEach((p, i) => i ? x.lineTo(X(i), Y(p.v)) : x.moveTo(X(i), Y(p.v)));
   x.stroke();
-  x.fillStyle = color || '#4d8dff';
+  x.fillStyle = color || '#d8ff45';
   pts.forEach((p, i) => { x.beginPath(); x.arc(X(i), Y(p.v), 2.8, 0, 7); x.fill(); });
-  x.fillStyle = '#5d6678';
+  x.fillStyle = '#5a616d';
   [0, pts.length - 1].forEach(i => {
     if (i < 0) return;
     const t = x.measureText(pts[i].label).width;
@@ -579,10 +579,10 @@ function viewNutrition(el) {
         <div><b class="mono warn">${n0(T.f)}</b><span>F (g)</span></div>
         <div><b class="mono acc">${n0(T.c)}</b><span>C (g)</span></div>
       </div>
-      ${barRow('カロリー', T.kcal, P.kcal, 'kcal', '#e8ecf3')}
-      ${barRow('タンパク質', T.p, P.p, 'g', '#31d0a5')}
-      ${barRow('脂質', T.f, P.f, 'g', '#ffb547')}
-      ${barRow('糖質', T.c, P.c, 'g', '#4d8dff')}
+      ${barRow('カロリー', T.kcal, P.kcal, 'kcal', '#f2f5fa')}
+      ${barRow('タンパク質', T.p, P.p, 'g', '#3ddc97')}
+      ${barRow('脂質', T.f, P.f, 'g', '#ffb020')}
+      ${barRow('糖質', T.c, P.c, 'g', '#d8ff45')}
     </div>
 
     <h2 class="sec">クイック追加</h2>
@@ -824,8 +824,8 @@ function viewHistory(el) {
       </div>`;
     }).join('') : '<div class="card sm dim">履歴なし</div>'}
   `;
-  chart(el.querySelector('#c1'), recs, '#4d8dff');
-  chart(el.querySelector('#c2'), bodyPts, '#31d0a5');
+  chart(el.querySelector('#c1'), recs, '#d8ff45');
+  chart(el.querySelector('#c2'), bodyPts, '#3ddc97');
   el.querySelector('#hex').onchange = e => { S.histEx = e.target.value; save(); render(); };
   el.querySelectorAll('[data-sdel]').forEach(b => b.onclick = () => {
     if (!confirm('このセッションを削除しますか？')) return;
