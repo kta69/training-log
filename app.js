@@ -81,6 +81,15 @@ function bestOf(sets) {
   return best;
 }
 const setLabel = s => `${s.w || '自重'}${s.r ? ' × ' + s.r : ''}`;
+/* その日にやったセットを全部並べる（e1RM が最も高いセットを強調） */
+function setList(sets, cls = '') {
+  const rows = (sets || []).filter(s => s.w || s.r);
+  if (!rows.length) return `<b class="dim">—</b>`;
+  const best = bestOf(rows);
+  return `<div class="psets">${rows.map(s =>
+    `<div class="ps ${cls}${best && s.w === best.w && s.r === best.r ? ' top' : ''}">${esc(setLabel(s))}</div>`
+  ).join('')}</div>`;
+}
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -246,6 +255,7 @@ function viewWorkout(el) {
       <div id="sessbar">${doneToday && !sess ? `<div class="hr"></div><div class="xs ok">✓ ${fmtDate(d0)} の ${day.name} は完了済み（追記すると再開します）</div>` : ''}</div>
     </div>
     <div id="exlist"></div>
+    <div id="finishbar"></div>
   `;
   el.querySelector('.seg').onclick = e => {
     const b = e.target.closest('button[data-d]'); if (!b) return;
@@ -258,10 +268,17 @@ function viewWorkout(el) {
   renderExList(el.querySelector('#exlist'), day, sess);
 }
 
+/* 最後の種目を入力したらそのまま押せるよう、完了ボタンは種目リストの直下に置く */
 function showFinishBar(day) {
-  const bar = document.getElementById('sessbar'); if (!bar) return;
-  bar.innerHTML = `<div class="hr"></div><div class="row between"><span class="xs acc">● 記録中（自動保存）</span>
-    <button class="btn sm pri" id="finish">セッション完了</button></div>`;
+  const bar = document.getElementById('finishbar'); if (!bar) return;
+  bar.innerHTML = `<div class="card finish">
+    <div class="row between" style="margin-bottom:11px">
+      <span class="xs acc">● 記録中（自動保存）</span>
+      <span class="xs dim" id="finish-cnt"></span>
+    </div>
+    <button class="btn pri full" id="finish">セッション完了</button>
+  </div>`;
+  updateFinishCount(day);
   bar.querySelector('#finish').onclick = () => {
     const s = currentSession(day.id); if (!s) return;
     Object.keys(s.logs).forEach(k => { s.logs[k] = s.logs[k].filter(x => x.w || x.r); if (!s.logs[k].length) delete s.logs[k]; });
@@ -269,6 +286,18 @@ function showFinishBar(day) {
     else { s.done = true; toast('保存しました'); }
     save(); render();
   };
+}
+
+/* 完了ボタンの上に「何種目・何セット入力済みか」を出す */
+function updateFinishCount(day) {
+  const el = document.getElementById('finish-cnt'); if (!el) return;
+  const s = currentSession(day.id); if (!s) return;
+  let ex = 0, sets = 0;
+  Object.values(s.logs).forEach(list => {
+    const n = list.filter(x => x.w || x.r).length;
+    if (n) { ex++; sets += n; }
+  });
+  el.textContent = ex ? `${ex} 種目 · ${sets} セット` : '';
 }
 
 /* 並び順（ドラッグで変更可） */
@@ -315,7 +344,7 @@ function renderExList(host, day, sess) {
     arr[+i][k] = inp.value.trim();
     save();
     updateDelta(ex, sess);
-    if (first) showFinishBar(day);
+    if (first) showFinishBar(day); else updateFinishCount(day);
   });
   host.addEventListener('focusout', e => {
     const nm = e.target.closest('input[data-name]');
@@ -475,9 +504,10 @@ function exCard(main, sess) {
     </div>`;
 
   const prevHTML = `<div class="prev">
-    ${b1 ? `<div class="prevbox"><span class="xs dim">前回 ${fmtDate(p1.date)}</span><br><b>${esc(setLabel(b1))}</b></div>` : `<div class="prevbox"><span class="xs dim">前回</span><br><b class="dim">—</b></div>`}
-    ${b2 ? `<div class="prevbox"><span class="xs dim">前々回 ${fmtDate(p2.date)}</span><br><b class="mut">${esc(setLabel(b2))}</b></div>` : ''}
-    <div class="prevbox now" id="dl-${it.id}"><span class="xs dim">今回</span><br><b class="dim">—</b></div>
+    ${b1 ? `<div class="prevbox"><span class="xs dim">前回 ${fmtDate(p1.date)}</span>${setList(p1.logs[it.id])}</div>`
+         : `<div class="prevbox"><span class="xs dim">前回</span><b class="dim">—</b></div>`}
+    ${b2 ? `<div class="prevbox"><span class="xs dim">前々回 ${fmtDate(p2.date)}</span>${setList(p2.logs[it.id], 'mut')}</div>` : ''}
+    <div class="prevbox now" id="dl-${it.id}"><span class="xs dim">今回</span><b class="dim">—</b></div>
   </div>`;
 
   const setRows = rows.map((s, i) => `
@@ -513,7 +543,7 @@ function updateDelta(exId, sess) {
   const cur = bestOf(sess.logs[exId]);
   const prev = prevRecords(exId, sess.id)[0];
   const pb = prev && bestOf(prev.logs[exId]);
-  if (!cur) { box.innerHTML = `<span class="xs dim">今回</span><br><b class="dim">—</b>`; return; }
+  if (!cur) { box.innerHTML = `<span class="xs dim">今回</span><b class="dim">—</b>`; return; }
   let badge = '';
   if (pb && cur.e != null && pb.e != null) {
     const d = cur.e - pb.e, pct = d / pb.e * 100;
@@ -523,7 +553,7 @@ function updateDelta(exId, sess) {
     const d = sumW(cur.w) - sumW(pb.w);
     badge = ` <span class="xs ${d > 0 ? 'ok' : d < 0 ? 'bad' : 'mut'}">${d >= 0 ? '+' : ''}${n1(d)}kg</span>`;
   }
-  box.innerHTML = `<span class="xs dim">今回 e1RM ${cur.e != null ? n1(cur.e) : '—'}</span><br><b class="acc">${esc(setLabel(cur))}</b>${badge}`;
+  box.innerHTML = `<span class="xs dim">今回 e1RM ${cur.e != null ? n1(cur.e) : '—'}${badge}</span>${setList(sess.logs[exId], 'acc')}`;
 }
 
 /* ============ 食事 ============ */

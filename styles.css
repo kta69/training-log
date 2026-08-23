@@ -131,6 +131,16 @@ input.exname[data-custom="1"]{color:var(--acc)}
 .prevbox b{display:block;font-size:15px;font-weight:800;letter-spacing:-.025em;margin-top:1px}
 .prevbox.now{background:rgba(var(--acc-a),.06);border-color:rgba(var(--acc-a),.3)}
 .prevbox.now b{color:var(--acc)}
+/* その日にやったセットを全部縦に並べる。ベストセットだけ強調。 */
+.psets{display:flex;flex-direction:column;gap:1px;margin-top:3px}
+.ps{font-size:13px;font-weight:700;letter-spacing:-.025em;color:var(--mut);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ps.mut{color:var(--dim)}
+.ps.top{color:var(--fg);font-size:15px;font-weight:800}
+.ps.acc.top{color:var(--acc)}
+
+/* 完了ボタンは最後の種目のすぐ下に置く */
+.card.finish{border-color:var(--line2);margin-top:14px;margin-bottom:4px}
 
 .setrow{display:grid;grid-template-columns:20px 1fr 14px 1fr 26px;align-items:center;gap:7px;margin-top:8px}
 .setrow .idx{font-size:11px;color:var(--dim);font-weight:800;text-align:center}
