@@ -35,25 +35,9 @@ function defaults() {
   };
 }
 
-function seedSessions() {
-  const out = [];
-  PROGRAM.forEach((day, di) => {
-    [0, 1].forEach(k => {
-      const logs = {};
-      flatItems(day).forEach(it => {
-        const r = it.seed[k];
-        if (r && r[0]) logs[it.id] = [{ w: r[0], r: r[1] || '' }];
-      });
-      if (Object.keys(logs).length)
-        out.push({ id: uid(), date: dateAdd(-(7 * (k + 1) + di)), day: day.id, logs, done: true, seeded: true });
-    });
-  });
-  return out.sort((a, b) => a.date.localeCompare(b.date));
-}
-
 let S;
 try { S = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { S = null; }
-if (!S) { S = defaults(); S.sessions = seedSessions(); }
+if (!S) S = defaults();   // 新しい端末は空から始める（前回欄は「—」）
 const _d = defaults();
 S = Object.assign(_d, S);
 S.settings = Object.assign(_d.settings, S.settings);
@@ -939,7 +923,7 @@ function viewSettings(el) {
   };
   el.querySelector('#rst').onclick = () => {
     if (!confirm('全データを削除します。よろしいですか？')) return;
-    localStorage.removeItem(KEY); S = defaults(); S.sessions = seedSessions(); save(); render();
+    localStorage.removeItem(KEY); S = defaults(); save(); render();
   };
 }
 
