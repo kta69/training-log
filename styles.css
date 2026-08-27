@@ -210,9 +210,30 @@ select.bare:focus{box-shadow:none;background:transparent}
 .dropzone{border:1.5px dashed var(--line2);border-radius:14px;padding:28px 14px;text-align:center;color:var(--mut);
   background:var(--bg2);transition:border-color .18s,background .18s}
 .dropzone:active{border-color:rgba(255,255,255,.45);background:var(--bg3)}
-#fa-stage{position:relative;width:100%;background:#000;border-radius:12px;overflow:hidden;margin-bottom:12px;display:none}
+#fa-stage{position:relative;width:100%;background:#000;border-radius:12px;overflow:hidden;margin-bottom:10px;display:none}
 #fa-stage video{width:100%;display:block}
-#fa-stage canvas{position:absolute;inset:0;width:100%;height:100%}
+#fa-stage canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+
+/* 再生・軸表示コントロール */
+#fa-ctrl .ic{width:38px;height:38px;flex:0 0 auto;border-radius:11px;border:1px solid var(--line2);
+  background:var(--bg3);color:var(--fg);font-size:13px;font-weight:800;display:grid;place-items:center}
+#fa-ctrl .ic.wide{width:52px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+#fa-ctrl .ic:active{background:var(--bg4)}
+#fa-seek{flex:1 1 auto;min-width:0;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;
+  background:var(--line2);outline:none}
+#fa-seek::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;
+  background:var(--acc);border:2px solid var(--bg);box-shadow:0 0 9px rgba(var(--acc-a),.5)}
+#fa-seek::-moz-range-thumb{width:17px;height:17px;border:2px solid var(--bg);border-radius:50%;background:var(--acc)}
+.axhud{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:11px;text-align:center}
+.axhud > div{background:var(--bg3);border:1px solid var(--line);border-radius:9px;padding:7px 2px}
+.axhud b{display:block;font-size:16px;font-weight:800;letter-spacing:-.035em;line-height:1.1;
+  font-variant-numeric:tabular-nums}
+.axhud b span{font-size:10px;color:var(--dim);font-weight:700}
+.axhud > div > span{display:block;font-size:9px;color:var(--dim);font-weight:800;letter-spacing:.06em;margin-top:3px}
+.axsw{display:flex;gap:5px;margin-top:9px;flex-wrap:wrap}
+.axsw button{flex:1 1 0;min-width:64px;padding:8px 4px;border-radius:9px;font-size:11px;font-weight:800;
+  border:1px solid var(--line2);background:var(--bg3);color:var(--dim)}
+.axsw button.on{background:var(--fg);border-color:var(--fg);color:#08090c}
 .metric{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
 .metric:last-child{border-bottom:none}
 .metric .mv{font-size:19px;font-weight:800;letter-spacing:-.035em}

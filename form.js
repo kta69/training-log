@@ -158,22 +158,53 @@ function peaks(sig, minSepIdx) {
 
 /* ---------- モデル ---------- */
 let landmarker = null;
+
+/* MediaPipe の VIDEO モードはタイムスタンプが単調増加であることを要求する。
+   一度でも過去の値を渡すとグラフが壊れ、以降は正しい値を渡しても
+   "Packet timestamp mismatch" で失敗し続ける（＝2本目の動画が必ず解析不能になる）。
+   そのため動画をまたいで増え続けるカーソルを持ち、
+   フレーム間の実際の時間差だけを足していく（追跡の滑らかさは保たれる）。 */
+let tsCursor = 0, tsPrevMedia = null;
+const stampReset = () => { tsPrevMedia = null; };
+function stamp(tSec) {
+  const ms = Math.round(tSec * 1000);
+  const d = tsPrevMedia === null ? 33 : clamp(ms - tsPrevMedia, 1, 2000);
+  tsPrevMedia = ms;
+  return (tsCursor += d);
+}
+
 async function getLandmarker(onStatus) {
   if (landmarker) return landmarker;
   onStatus('AIモデルを読み込み中…（初回のみ・約10MB）');
   const fileset = await FilesetResolver.forVisionTasks(WASM);
-  try {
-    landmarker = await PoseLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: MODEL, delegate: 'GPU' },
-      runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5, minTrackingConfidence: 0.5
-    });
-  } catch (e) {
-    landmarker = await PoseLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: MODEL, delegate: 'CPU' },
-      runningMode: 'VIDEO', numPoses: 1
-    });
-  }
+  const opt = delegate => ({
+    baseOptions: { modelAssetPath: MODEL, delegate },
+    runningMode: 'VIDEO', numPoses: 1, minPoseDetectionConfidence: 0.5, minTrackingConfidence: 0.5
+  });
+  try { landmarker = await PoseLandmarker.createFromOptions(fileset, opt('GPU')); }
+  catch (e) { landmarker = await PoseLandmarker.createFromOptions(fileset, opt('CPU')); }
   return landmarker;
+}
+/* グラフが壊れた場合は作り直すしかない */
+async function resetLandmarker(onStatus) {
+  try { landmarker && landmarker.close(); } catch (e) { /* 破棄失敗は無視 */ }
+  landmarker = null;
+  return getLandmarker(onStatus);
+}
+
+/* 1フレーム分の推論。壊れた回数を数えておき、多ければ呼び出し側が作り直す */
+function makeDetector(lm, W, H) {
+  let broken = 0;
+  return {
+    get broken() { return broken; },
+    run(video, t) {
+      try {
+        const res = lm.detectForVideo(video, stamp(t));
+        const p = res.landmarks && res.landmarks[0];
+        return p ? grab(p, W, H, t, (res.worldLandmarks || [])[0]) : null;
+      } catch (e) { broken++; return null; }
+    }
+  };
 }
 
 /* ---------- 動画からランドマーク抽出 ---------- */
@@ -214,60 +245,66 @@ function grab(p, W, H, t, world) {
 
 /* 再生しながら実フレームを拾う。シーク方式より圧倒的に速く、
    フレームレートも動画本来のものに近づくのでテンポ計測の分解能が上がる。 */
-function extractByPlayback(video, lm, dur, W, H, onProgress) {
+function extractByPlayback(video, det, dur, onProgress) {
   return new Promise((resolve, reject) => {
     const frames = [];
-    let last = -1, stalls = 0;
+    let last = -1, done = false;
+    const finish = () => { if (done) return; done = true; video.pause(); clearTimeout(timer); resolve(frames); };
     // 1フレームあたり 20〜40ms の推論が要るので、取りこぼさないよう再生速度を落とす
     video.playbackRate = dur > 12 ? 1 : 0.5;
     const step = (now, meta) => {
+      if (done) return;
       const t = meta.mediaTime;
-      if (t > last + 1e-4) {
-        last = t;
-        try {
-          const res = lm.detectForVideo(video, Math.round(t * 1000));
-          const p = res.landmarks && res.landmarks[0];
-          if (p) frames.push(grab(p, W, H, t, (res.worldLandmarks || [])[0]));
-        } catch (e) { stalls++; }
-      }
+      if (t > last + 1e-4) { last = t; const f = det.run(video, t); if (f) frames.push(f); }
       onProgress(Math.min(1, t / dur));
-      if (video.ended || t >= dur - 0.02 || stalls > 30 || frames.length > 900) { video.pause(); resolve(frames); }
+      // グラフが壊れたら以降は何を渡しても失敗するので、粘らず即座に諦めて作り直させる
+      if (video.ended || t >= dur - 0.02 || det.broken > 5 || frames.length > 900) finish();
       else video.requestVideoFrameCallback(step);
     };
+    const timer = setTimeout(finish, 60000);
     video.requestVideoFrameCallback(step);
-    video.play().catch(reject);
-    setTimeout(() => { video.pause(); resolve(frames); }, 60000);
+    video.play().catch(err => { clearTimeout(timer); reject(err); });
   });
 }
 
-/* rVFC が使えない環境向けのシーク方式 */
-async function extractBySeek(video, lm, dur, W, H, onProgress) {
+/* rVFC が使えない環境／再生が阻まれた場合のシーク方式 */
+async function extractBySeek(video, det, dur, onProgress) {
   const frames = [];
   const step = Math.max(1 / 15, dur / 300);
   for (let t = 0; t < dur - 0.02; t += step) {
     await seekTo(video, t);
-    let res;
-    try { res = lm.detectForVideo(video, Math.round(t * 1000)); } catch (e) { continue; }
-    const p = res.landmarks && res.landmarks[0];
-    if (p) frames.push(grab(p, W, H, t, (res.worldLandmarks || [])[0]));
+    const f = det.run(video, t);
+    if (f) frames.push(f);
+    if (det.broken > 5) break;
     onProgress(t / dur);
   }
   return frames;
 }
 
 async function extract(video, onProgress, onStatus) {
-  const lm = await getLandmarker(onStatus);
+  let lm = await getLandmarker(onStatus);
   const W = video.videoWidth, H = video.videoHeight;
+  if (!W || !H) throw new Error('動画の映像を取得できませんでした。別の形式（MP4/H.264）で書き出して試してください。');
   const dur = await durationOf(video);
   onStatus('関節を検出中…');
-  const canRVFC = typeof video.requestVideoFrameCallback === 'function';
-  let frames = [];
-  if (canRVFC) {
-    try { frames = await extractByPlayback(video, lm, dur, W, H, onProgress); } catch (e) { frames = []; }
-  }
+
+  const pass = async useSeek => {
+    stampReset();                              // 新しいパスはフレーム間隔から数え直す
+    const det = makeDetector(lm, W, H);
+    const f = useSeek
+      ? await extractBySeek(video, det, dur, onProgress)
+      : await extractByPlayback(video, det, dur, onProgress).catch(() => []);
+    return { f, det };
+  };
+
+  let { f: frames, det } = typeof video.requestVideoFrameCallback === 'function'
+    ? await pass(false) : { f: [], det: { broken: 0 } };
+
   if (frames.length < 12) {                    // 再生が阻まれた場合はシークで取り直す
     video.pause(); video.playbackRate = 1;
-    frames = await extractBySeek(video, lm, dur, W, H, onProgress);
+    if (det.broken > 0) { onStatus('検出器を初期化中…'); lm = await resetLandmarker(onStatus); }
+    onStatus('関節を検出中…（1コマずつ）');
+    ({ f: frames } = await pass(true));
   }
   return { frames, W, H, fps: frames.length > 1 ? (frames.length - 1) / (frames[frames.length - 1].t - frames[0].t) : 0 };
 }
@@ -549,24 +586,118 @@ function analyze(type, rawFrames, heightCm, fps) {
   };
 }
 
-/* ---------- 骨格描画 ---------- */
+/* ---------- 骨格・関節軸の描画 ---------- */
 const BONES = [['ear', 'sh'], ['sh', 'el'], ['el', 'wr'], ['sh', 'hip'], ['hip', 'kn'], ['kn', 'an']];
-function drawSkeleton(cv, frame, W, H) {
+const CO = { acc: '#d8ff45', ok: '#3ddc97', warn: '#ffb020', bad: '#ff4d5e', far: 'rgba(140,148,161,.34)' };
+
+/* 種目ごとに「見るべき軸」を切り替える。
+   plumb: 鉛直基準を立てる関節（重量がこの真上に乗っているかを見る）
+   axis : 延長線を引く分節  ang: 円弧で角度を出す関節  path: 軌跡を残す点
+   tilt : 鉛直からのズレを数値で出す分節（その種目で最も効く角度） */
+const AXES = {
+  bench: { plumb: 'sh', axis: [['el', 'wr'], ['sh', 'el']], ang: [['sh', 'el', 'wr', '肘']], path: 'wr', tilt: ['el', 'wr', '前腕'] },
+  ohp: { plumb: 'an', axis: [['hip', 'sh'], ['el', 'wr']], ang: [['sh', 'el', 'wr', '肘'], ['sh', 'hip', 'kn', '股']], path: 'wr', tilt: ['hip', 'sh', '体幹'] },
+  scap: { plumb: 'sh', axis: [['hip', 'sh'], ['el', 'wr']], ang: [['sh', 'el', 'wr', '肘']], path: 'wr', tilt: ['hip', 'sh', '体幹'] },
+  squat: { plumb: 'an', axis: [['hip', 'sh'], ['hip', 'kn']], ang: [['sh', 'hip', 'kn', '股'], ['hip', 'kn', 'an', '膝']], path: 'sh', tilt: ['hip', 'sh', '体幹'] },
+  hinge: { plumb: 'an', axis: [['hip', 'sh'], ['hip', 'kn']], ang: [['sh', 'hip', 'kn', '股'], ['hip', 'kn', 'an', '膝']], path: 'wr', tilt: ['hip', 'sh', '体幹'] }
+};
+
+const seg2 = (x, a, b) => { x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x, b.y); x.stroke(); };
+/* a→b の分節を画面外まで延長する（鉛直基準線との比較で傾きが読める） */
+function extend(x, a, b, W, H) {
+  const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1, k = (W + H) / L;
+  x.beginPath(); x.moveTo(a.x - dx * k, a.y - dy * k); x.lineTo(a.x + dx * k, a.y + dy * k); x.stroke();
+}
+function rrect(x, X, Y, w, h, r) {
+  x.beginPath();
+  x.moveTo(X + r, Y); x.arcTo(X + w, Y, X + w, Y + h, r); x.arcTo(X + w, Y + h, X, Y + h, r);
+  x.arcTo(X, Y + h, X, Y, r); x.arcTo(X, Y, X + w, Y, r); x.closePath();
+}
+/* 読めるように必ず背景を敷く（動画の上に直接文字を置くと潰れる） */
+function chip(x, cx, cy, text, color, F) {
+  x.font = `800 ${F}px ui-monospace,SFMono-Regular,Menlo,monospace`;
+  const w = x.measureText(text).width + F * 0.8, h = F * 1.6;
+  x.fillStyle = 'rgba(8,9,12,.82)'; rrect(x, cx - w / 2, cy - h / 2, w, h, h / 2); x.fill();
+  x.strokeStyle = color; x.lineWidth = Math.max(1, F / 14); x.stroke();
+  x.fillStyle = color; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillText(text, cx, cy);
+}
+/* b を頂点とする角度を円弧で描き、外側に数値を置く */
+function arcAt(x, a, b, c, R, color, label, F, U) {
+  const a1 = Math.atan2(a.y - b.y, a.x - b.x), a2 = Math.atan2(c.y - b.y, c.x - b.x);
+  let d = a2 - a1;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  x.strokeStyle = color; x.lineWidth = U * 1.5;
+  x.beginPath(); x.arc(b.x, b.y, R, a1, a1 + d, d < 0); x.stroke();
+  const m = a1 + d / 2;
+  chip(x, b.x + Math.cos(m) * (R + F * 1.15), b.y + Math.sin(m) * (R + F * 1.15), label, color, F);
+}
+
+function drawOverlay(cv, DF, idx, W, H, side, type, show) {
   cv.width = W; cv.height = H;
   const x = cv.getContext('2d');
   x.clearRect(0, 0, W, H);
-  ['R', 'L'].forEach(s => {
-    const j = frame[s], main = s === (frame._side || 'L');
-    x.strokeStyle = main ? '#d8ff45' : 'rgba(140,148,161,.4)';
-    x.lineWidth = Math.max(2, W / 260); x.lineCap = 'round';
-    BONES.forEach(([a, b]) => { x.beginPath(); x.moveTo(j[a].x, j[a].y); x.lineTo(j[b].x, j[b].y); x.stroke(); });
-    x.fillStyle = main ? '#3ddc97' : 'rgba(140,148,161,.45)';
-    Object.values(j).forEach(p => { x.beginPath(); x.arc(p.x, p.y, Math.max(3, W / 190), 0, 7); x.fill(); });
-  });
+  const f = DF[idx]; if (!f) return;
+  const A = AXES[type] || AXES.bench;
+  const U = Math.max(1.5, W / 400);              // 線幅の基準
+  const F = Math.max(12, Math.round(W / 30));    // 文字サイズ
+  const near = f[side], far = f[side === 'L' ? 'R' : 'L'];
+  x.lineCap = 'round'; x.lineJoin = 'round';
+
+  // ① 鉛直基準線。重量物がこの線の上に乗り続けているかが全種目で最重要
+  if (show.plumb) {
+    const b = near[A.plumb];
+    x.save(); x.setLineDash([U * 4, U * 4]); x.lineWidth = U; x.strokeStyle = 'rgba(216,255,69,.5)';
+    x.beginPath(); x.moveTo(b.x, 0); x.lineTo(b.x, H); x.stroke(); x.restore();
+    chip(x, b.x, H - F * 1.4, A.plumb === 'an' ? '中足部の鉛直線' : '肩の鉛直線', 'rgba(216,255,69,.9)', F * 0.72);
+  }
+
+  // ② 分節軸の延長線。鉛直線との交差角がそのままモーメントの大きさに対応する
+  if (show.axis) {
+    x.save(); x.setLineDash([U * 2.5, U * 2.5]); x.lineWidth = U * 0.9; x.strokeStyle = 'rgba(61,220,151,.45)';
+    A.axis.forEach(([a, b]) => extend(x, near[a], near[b], W, H));
+    x.restore();
+  }
+
+  // ③ 骨格（奥側は薄く／手前側を主として扱う）
+  x.lineWidth = U * 1.7; x.strokeStyle = CO.far;
+  BONES.forEach(([a, b]) => seg2(x, far[a], far[b]));
+  x.lineWidth = U * 2.7; x.strokeStyle = CO.acc;
+  BONES.forEach(([a, b]) => seg2(x, near[a], near[b]));
+  x.fillStyle = '#08090c'; x.strokeStyle = CO.ok; x.lineWidth = U * 1.5;
+  JOINTS.forEach(k => { const p = near[k]; x.beginPath(); x.arc(p.x, p.y, U * 2.3, 0, 7); x.fill(); x.stroke(); });
+
+  // ④ バーの軌跡。骨格と重なる区間が多いので必ず上に描く
+  if (show.path) {
+    x.save();
+    x.lineWidth = U * 2; x.strokeStyle = 'rgba(255,255,255,.72)';
+    x.beginPath();
+    DF.forEach((g, i) => { const p = g[side][A.path]; i ? x.lineTo(p.x, p.y) : x.moveTo(p.x, p.y); });
+    x.stroke(); x.restore();
+    const p = near[A.path];
+    x.fillStyle = '#fff'; x.strokeStyle = '#08090c'; x.lineWidth = U;
+    x.beginPath(); x.arc(p.x, p.y, U * 3.2, 0, 7); x.fill(); x.stroke();
+  }
+
+  // ⑤ 関節角度
+  if (show.ang) A.ang.forEach(([a, b, c, lab]) =>
+    arcAt(x, near[a], near[b], near[c], Math.max(F * 1.5, dist(near[b], near[c]) * 0.28),
+      CO.ok, `${lab} ${ang3(near[a], near[b], near[c]).toFixed(0)}°`, F, U));
+
+  // ⑥ 鉛直からのズレ（その種目の主指標）
+  if (show.axis) {
+    const [a, b, lab] = A.tilt;
+    const deg = Math.abs(fold(vAng(near[a], near[b])));
+    chip(x, (near[a].x + near[b].x) / 2, (near[a].y + near[b].y) / 2, `${lab} ${deg.toFixed(0)}°`, CO.acc, F);
+  }
 }
 
 /* ---------- UI ---------- */
-let state = { type: 'bench', file: null, result: null, busy: false, msg: '', prog: 0, raw: null };
+let state = {
+  type: 'bench', file: null, result: null, busy: false, msg: '', prog: 0, raw: null,
+  show: { ang: true, axis: true, plumb: true, path: true }, speed: 0.5
+};
 
 function render(el) {
   if (window.FA_PRESET) { state.type = window.FA_PRESET; window.FA_PRESET = null; state.result = null; }
@@ -586,6 +717,7 @@ function render(el) {
     </div>
 
     <div id="fa-stage"><video playsinline muted preload="auto"></video><canvas></canvas></div>
+    ${r && state.raw ? stageCtrlHTML(r) : ''}
 
     ${state.busy ? `
       <div class="card">
@@ -624,18 +756,86 @@ function render(el) {
   if (r) {
     const c = el.querySelector('#fa-chart');
     if (c) requestAnimationFrame(() => drawSeries(c, r));
-    if (state.raw) {
-      const stage = el.querySelector('#fa-stage');
-      stage.style.display = 'block';
-      const v = stage.querySelector('video');
-      v.src = state.raw.url;
-      v.onloadeddata = () => {
-        const f = r.drawFrames[r.keyIdx];
-        v.currentTime = f ? f.t : 0;
-        if (f) { f._side = r.side.startsWith('左') ? 'L' : 'R'; drawSkeleton(stage.querySelector('canvas'), f, state.raw.W, state.raw.H); }
-      };
-    }
+    if (state.raw) mountStage(el, r);
   }
+}
+
+/* ---------- 再生・軸表示のコントロール ---------- */
+const SWITCHES = [['ang', '関節角度'], ['axis', '分節軸'], ['plumb', '鉛直基準'], ['path', '軌跡']];
+
+function stageCtrlHTML(r) {
+  return `
+    <div class="card tight" id="fa-ctrl">
+      <div class="row" style="gap:9px;align-items:center">
+        <button class="ic" id="fa-play">▶</button>
+        <input type="range" id="fa-seek" min="0" max="${r.drawFrames.length - 1}" value="${r.keyIdx}" step="1">
+        <button class="ic wide" id="fa-speed">${state.speed}×</button>
+      </div>
+      <div class="axhud" id="fa-hud"></div>
+      <div class="axsw" id="fa-sw">${SWITCHES.map(([k, n]) =>
+        `<button data-sw="${k}" class="${state.show[k] ? 'on' : ''}">${n}</button>`).join('')}</div>
+      <div class="xs dim" style="margin-top:8px;line-height:1.65">
+        スライダーで1コマずつ送れます。<b>破線＝鉛直基準</b>：バー（手首）がこの線から離れるほど、その距離×重量が関節のモーメントになります。
+      </div>
+    </div>`;
+}
+
+function hudHTML(f, side) {
+  const j = f[side];
+  const items = [
+    ['肘', ang3(j.sh, j.el, j.wr)], ['股関節', ang3(j.sh, j.hip, j.kn)], ['膝', ang3(j.hip, j.kn, j.an)],
+    ['体幹', Math.abs(fold(vAng(j.hip, j.sh)))], ['前腕', Math.abs(fold(vAng(j.el, j.wr)))]
+  ];
+  return items.map(([n, v]) => `<div><b>${v.toFixed(0)}<span>°</span></b><span>${n}</span></div>`).join('');
+}
+
+function mountStage(el, r) {
+  const stage = el.querySelector('#fa-stage'); if (!stage) return;
+  stage.style.display = 'block';
+  const v = stage.querySelector('video'), cv = stage.querySelector('canvas');
+  const DF = r.drawFrames, sideK = r.side.startsWith('左') ? 'L' : 'R';
+  const seek = el.querySelector('#fa-seek'), hud = el.querySelector('#fa-hud'),
+    play = el.querySelector('#fa-play'), spd = el.querySelector('#fa-speed');
+  let idx = clamp(r.keyIdx, 0, DF.length - 1);
+
+  const paint = () => {
+    drawOverlay(cv, DF, idx, state.raw.W, state.raw.H, sideK, state.type, state.show);
+    hud.innerHTML = hudHTML(DF[idx], sideK);
+    if (+seek.value !== idx) seek.value = idx;
+  };
+  const goto = i => { idx = clamp(i, 0, DF.length - 1); v.currentTime = DF[idx].t; paint(); };
+
+  v.src = state.raw.url;
+  v.playbackRate = state.speed;
+  v.onloadeddata = () => goto(idx);
+  seek.oninput = () => { if (!v.paused) v.pause(); goto(+seek.value); };
+
+  /* 再生中は解析済みフレームのうち現在時刻に最も近いものを選んで重ねる */
+  const tick = () => {
+    if (!cv.isConnected) return;                    // 再描画で破棄されたら止める
+    if (v.paused) return;
+    while (idx < DF.length - 1 && DF[idx + 1].t <= v.currentTime) idx++;
+    paint();
+    if (v.currentTime >= DF[DF.length - 1].t) { v.pause(); return; }
+    requestAnimationFrame(tick);
+  };
+  v.onplay = () => { play.textContent = '❙❙'; requestAnimationFrame(tick); };
+  v.onpause = () => { play.textContent = '▶'; };
+  play.onclick = () => {
+    if (!v.paused) return v.pause();
+    if (idx >= DF.length - 1) goto(0);
+    v.play().catch(() => {});
+  };
+  spd.onclick = () => {
+    state.speed = state.speed === 1 ? 0.5 : state.speed === 0.5 ? 0.25 : 1;
+    v.playbackRate = state.speed; spd.textContent = state.speed + '×';
+  };
+  el.querySelector('#fa-sw').onclick = e => {
+    const b = e.target.closest('button[data-sw]'); if (!b) return;
+    state.show[b.dataset.sw] = !state.show[b.dataset.sw];
+    b.classList.toggle('on', state.show[b.dataset.sw]);
+    paint();
+  };
 }
 
 function resultHTML(r) {
@@ -703,10 +903,16 @@ async function run(el, file) {
   const url = URL.createObjectURL(file);
   const v = document.createElement('video');
   v.src = url; v.muted = true; v.playsInline = true; v.preload = 'auto';
+  v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
+  // 画面外でも DOM に載せる。切り離された video は再生・rVFC が抑制される環境がある
+  v.style.cssText = 'position:fixed;left:-10000px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+  document.body.appendChild(v);
   try {
     await new Promise((res, rej) => {
-      v.onloadeddata = res; v.onerror = () => rej(new Error('動画を読み込めませんでした'));
-      setTimeout(() => rej(new Error('読み込みタイムアウト')), 20000);
+      const ready = () => { if (v.videoWidth) res(); };
+      v.onloadeddata = ready; v.onloadedmetadata = ready; v.oncanplay = ready;
+      v.onerror = () => rej(new Error('この動画は再生できませんでした。MP4（H.264）で書き出して試してください。'));
+      setTimeout(() => rej(new Error('読み込みがタイムアウトしました。動画が長すぎるか、形式が対応していない可能性があります。')), 20000);
     });
     const { frames, W, H, fps } = await extract(v,
       p => { state.prog = p; const b = el.querySelector('.bar > i'); if (b) b.style.width = Math.round(p * 100) + '%'; },
@@ -723,6 +929,8 @@ async function run(el, file) {
   } catch (e) {
     URL.revokeObjectURL(url);
     alert(e.message || '解析に失敗しました');
+  } finally {
+    v.pause(); v.removeAttribute('src'); v.load(); v.remove();
   }
   state.busy = false;
   render(el);
