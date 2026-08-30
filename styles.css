@@ -126,7 +126,7 @@ input.exname[data-custom="1"]{color:var(--acc)}
   color:var(--fg);box-shadow:none}
 .datepick input:focus{box-shadow:none;border:none;background:transparent}
 
-.prev{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:6px;margin-top:9px}
+.prev{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}
 .prevbox{background:var(--bg3);border:1px solid var(--line);border-radius:10px;padding:7px 9px;font-size:11.5px;min-width:0}
 .prevbox b{display:block;font-size:15px;font-weight:800;letter-spacing:-.025em;margin-top:1px}
 .prevbox.now{background:rgba(var(--acc-a),.06);border-color:rgba(var(--acc-a),.3)}
@@ -135,7 +135,6 @@ input.exname[data-custom="1"]{color:var(--acc)}
 .psets{display:flex;flex-direction:column;gap:1px;margin-top:3px}
 .ps{font-size:13px;font-weight:700;letter-spacing:-.025em;color:var(--mut);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ps.mut{color:var(--dim)}
 .ps.top{color:var(--fg);font-size:15px;font-weight:800}
 .ps.acc.top{color:var(--acc)}
 

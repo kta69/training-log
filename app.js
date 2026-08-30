@@ -459,10 +459,8 @@ const memoOpen = new Set();
 function exCard(main, sess) {
   const vs = variantsOf(main);
   const it = activeVar(main);
-  const prev = prevRecords(it.id, sess && sess.id);
-  const p1 = prev[0], p2 = prev[1];
+  const p1 = prevRecords(it.id, sess && sess.id)[0];
   const b1 = p1 && bestOf(p1.logs[it.id]);
-  const b2 = p2 && bestOf(p2.logs[it.id]);
   const sets = (sess && sess.logs[it.id]) || [];
   const rows = sets.length ? sets : Array.from({ length: it.sets || 2 }, () => ({ w: '', r: '' }));
 
@@ -490,7 +488,6 @@ function exCard(main, sess) {
   const prevHTML = `<div class="prev">
     ${b1 ? `<div class="prevbox"><span class="xs dim">前回 ${fmtDate(p1.date)}</span>${setList(p1.logs[it.id])}</div>`
          : `<div class="prevbox"><span class="xs dim">前回</span><b class="dim">—</b></div>`}
-    ${b2 ? `<div class="prevbox"><span class="xs dim">前々回 ${fmtDate(p2.date)}</span>${setList(p2.logs[it.id], 'mut')}</div>` : ''}
     <div class="prevbox now" id="dl-${it.id}"><span class="xs dim">今回</span><b class="dim">—</b></div>
   </div>`;
 
