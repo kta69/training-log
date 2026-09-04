@@ -11,7 +11,7 @@
 <title>Training Log</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon.png">
-<link rel="stylesheet" href="styles.css?v=12">
+<link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
 
@@ -24,18 +24,15 @@
 
 <nav id="tabbar">
   <button data-tab="workout"><span>▤</span>筋トレ</button>
-  <button data-tab="nutrition"><span>◍</span>食事</button>
-  <button data-tab="form"><span>▶</span>フォーム</button>
+  <button data-tab="body"><span>◍</span>体組成</button>
   <button data-tab="history"><span>◔</span>記録</button>
   <button data-tab="settings"><span>⚙</span>設定</button>
 </nav>
 
 <div id="toast"></div>
 
-<script src="data.js?v=12"></script>
-<script src="app.js?v=12"></script>
-<script type="module" src="form.js?v=12"></script>
-<script type="module" src="body.js?v=12"></script>
+<script src="data.js?v=13"></script>
+<script src="app.js?v=13"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));

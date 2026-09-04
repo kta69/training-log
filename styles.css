@@ -22,7 +22,7 @@ html,body{margin:0;padding:0;color:var(--fg);
   background-image:radial-gradient(130% 52% at 50% -14%, rgba(var(--acc-a),.07), transparent 64%)}
 button,input,select,textarea{font-family:inherit;font-size:16px;color:inherit}
 button{cursor:pointer;border:none;background:none}
-.mono,input[inputmode],.prevbox b,.macro4 b,.metric .mv,.bfbig{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.mono,input[inputmode],.prevbox b{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
 
 /* ---- chrome ---- */
 #appbar{position:sticky;top:0;z-index:50;padding:calc(var(--safe-t) + 12px) 16px 12px;
@@ -34,7 +34,7 @@ button{cursor:pointer;border:none;background:none}
 
 #app{padding:14px 14px calc(var(--safe-b) + 92px);max-width:640px;margin:0 auto}
 
-#tabbar{position:fixed;bottom:0;left:0;right:0;z-index:60;display:grid;grid-template-columns:repeat(5,1fr);
+#tabbar{position:fixed;bottom:0;left:0;right:0;z-index:60;display:grid;grid-template-columns:repeat(4,1fr);
   background:rgba(8,9,12,.86);backdrop-filter:saturate(160%) blur(20px);-webkit-backdrop-filter:saturate(160%) blur(20px);
   border-top:1px solid rgba(255,255,255,.07);padding-bottom:var(--safe-b)}
 #tabbar button{position:relative;padding:11px 2px 12px;font-size:10px;color:var(--dim);display:flex;flex-direction:column;
@@ -82,20 +82,11 @@ label.fl{display:block;font-size:10px;color:var(--dim);margin-bottom:5px;font-we
 .pill{display:inline-flex;align-items:center;gap:4px;background:var(--bg3);border:1px solid var(--line);
   border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;color:var(--mut);letter-spacing:.01em}
 .pill.acc{background:rgba(var(--acc-a),.12);border-color:rgba(var(--acc-a),.32);color:var(--acc)}
-.pill.ok{background:rgba(61,220,151,.11);border-color:rgba(61,220,151,.3);color:var(--ok)}
-.pill.warn{background:rgba(255,176,32,.11);border-color:rgba(255,176,32,.3);color:var(--warn)}
-.pill.bad{background:rgba(255,77,94,.11);border-color:rgba(255,77,94,.3);color:var(--bad)}
-
 .seg{display:flex;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:3px;gap:2px;
   margin-bottom:13px}
 .seg button{flex:1;padding:9px 2px;border-radius:9px;font-size:13px;font-weight:700;color:var(--mut);
   transition:background .18s,color .18s}
 .seg button.on{background:var(--fg);color:#08090c;font-weight:800}
-
-.bar{height:6px;border-radius:99px;background:rgba(0,0,0,.5);overflow:hidden;margin-top:5px;
-  border:1px solid var(--line)}
-.bar > i{display:block;height:100%;border-radius:99px;background:var(--acc);
-  box-shadow:0 0 12px rgba(var(--acc-a),.45);transition:width .35s cubic-bezier(.4,0,.2,1)}
 
 /* ---- workout ---- */
 .exhead{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
@@ -163,100 +154,27 @@ input.exname[data-custom="1"]{color:var(--acc)}
   box-shadow:0 0 7px rgba(var(--acc-a),.8)}
 .vchip.add{border-style:dashed;color:var(--dim)}
 
-/* プリセット編集 */
-.peditor{background:var(--bg3);border:1px solid var(--line);border-radius:11px;padding:10px;margin-bottom:9px}
-.peditor + .peditor{margin-top:0}
-input.pname{font-weight:800;font-size:14px;background:transparent;border:1px solid transparent;
-  border-radius:8px;padding:4px 6px;box-shadow:none}
-input.pname:focus{background:var(--bg);border-color:rgba(255,255,255,.4);box-shadow:0 0 0 3px rgba(255,255,255,.08)}
-.prow{display:grid;grid-template-columns:1fr 62px 22px 26px;align-items:center;gap:6px;margin-top:7px}
-.prow select{font-size:12.5px;padding:7px 24px 7px 8px;height:auto}
-.prow input{text-align:center;padding:7px 2px;font-size:13px;font-weight:700}
-.prow .del{color:var(--dim);font-size:16px;border-radius:8px;padding:4px 0}
-.prow .del:active{background:var(--bg2);color:var(--bad)}
-
-/* おすすめ食材 */
-.frec{display:flex;gap:9px;padding:10px 0;border-top:1px solid var(--line)}
-.frec:first-child{border-top:none;padding-top:0}
-.frec > b{flex:0 0 auto;font-size:13px}
-.frec .q{flex:0 0 auto;font-size:10.5px;font-weight:800;color:var(--acc);letter-spacing:.02em;
-  background:rgba(var(--acc-a),.1);border:1px solid rgba(var(--acc-a),.22);border-radius:6px;padding:2px 6px;align-self:flex-start}
-.frec .why{font-size:11.5px;line-height:1.6;color:var(--mut);margin-top:2px}
-
-select.bare{background:transparent;border:none;padding:0 2px;font-size:11.5px;font-weight:800;
-  color:inherit;box-shadow:none;height:auto;-webkit-appearance:none;appearance:none}
-select.bare:focus{box-shadow:none;background:transparent}
-
 /* 目標レップ（編集可） */
 .pill.tgt{gap:3px;padding-top:2px;padding-bottom:2px}
 .pill.tgt input{width:2.4em;text-align:center;background:transparent;border:1px solid transparent;
   border-radius:6px;padding:2px 0;font-size:12px;font-weight:800;color:var(--fg);box-shadow:none}
 .pill.tgt input:focus{background:var(--bg);border-color:rgba(255,255,255,.45);box-shadow:0 0 0 3px rgba(255,255,255,.08)}
 .addset{margin-top:9px;width:100%}
-.warmup{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 
-/* ---- food ---- */
-.fitem{display:grid;grid-template-columns:1fr 78px auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
-.fitem:last-child{border-bottom:none}
-.fitem input{text-align:right;padding:7px 8px;font-size:14px;font-weight:700}
-.macro4{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;text-align:center}
-.macro4 > div{background:var(--bg3);border:1px solid var(--line);border-radius:11px;padding:11px 4px}
-.macro4 b{display:block;font-size:19px;font-weight:800;letter-spacing:-.035em;line-height:1.1}
-.macro4 span{display:block;font-size:9px;color:var(--dim);font-weight:800;letter-spacing:.11em;
-  text-transform:uppercase;margin-top:4px}
-
-/* ---- form analysis / body scan ---- */
-.dropzone{border:1.5px dashed var(--line2);border-radius:14px;padding:28px 14px;text-align:center;color:var(--mut);
-  background:var(--bg2);transition:border-color .18s,background .18s}
-.dropzone:active{border-color:rgba(255,255,255,.45);background:var(--bg3)}
-#fa-stage{position:relative;width:100%;background:#000;border-radius:12px;overflow:hidden;margin-bottom:10px;display:none}
-#fa-stage video{width:100%;display:block}
-#fa-stage canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-
-/* 再生・軸表示コントロール */
-#fa-ctrl .ic{width:38px;height:38px;flex:0 0 auto;border-radius:11px;border:1px solid var(--line2);
-  background:var(--bg3);color:var(--fg);font-size:13px;font-weight:800;display:grid;place-items:center}
-#fa-ctrl .ic.wide{width:52px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-#fa-ctrl .ic:active{background:var(--bg4)}
-#fa-seek{flex:1 1 auto;min-width:0;-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;
-  background:var(--line2);outline:none}
-#fa-seek::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;border-radius:50%;
-  background:var(--acc);border:2px solid var(--bg);box-shadow:0 0 9px rgba(var(--acc-a),.5)}
-#fa-seek::-moz-range-thumb{width:17px;height:17px;border:2px solid var(--bg);border-radius:50%;background:var(--acc)}
-.axhud{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:11px;text-align:center}
-.axhud > div{background:var(--bg3);border:1px solid var(--line);border-radius:9px;padding:7px 2px}
-.axhud b{display:block;font-size:16px;font-weight:800;letter-spacing:-.035em;line-height:1.1;
-  font-variant-numeric:tabular-nums}
-.axhud b span{font-size:10px;color:var(--dim);font-weight:700}
-.axhud > div > span{display:block;font-size:9px;color:var(--dim);font-weight:800;letter-spacing:.06em;margin-top:3px}
-.axsw{display:flex;gap:5px;margin-top:9px;flex-wrap:wrap}
-.axsw button{flex:1 1 0;min-width:64px;padding:8px 4px;border-radius:9px;font-size:11px;font-weight:800;
-  border:1px solid var(--line2);background:var(--bg3);color:var(--dim)}
-.axsw button.on{background:var(--fg);border-color:var(--fg);color:#08090c}
-.metric{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid var(--line)}
-.metric:last-child{border-bottom:none}
-.metric .mv{font-size:19px;font-weight:800;letter-spacing:-.035em}
-.metric .mn{font-size:13px}
-.metric .mh{font-size:11px;color:var(--dim);margin-top:3px;line-height:1.5}
-.advice{background:var(--bg3);border-left:2px solid var(--fg);border-radius:0 11px 11px 0;padding:11px 13px;
-  margin-top:9px;font-size:13px;line-height:1.7;color:var(--mut)}
-.advice b{color:var(--fg)}
-.advice.warn{border-left-color:var(--warn)}
-.advice.bad{border-left-color:var(--bad)}
-.advice.ok{border-left-color:var(--ok)}
+/* ---- 体組成 ---- */
 canvas.chart{width:100%;height:150px;display:block}
-
-/* 撮り方の手順 */
-ol.shot{margin:9px 0 0;padding-left:19px;font-size:12.5px;line-height:1.75;color:var(--mut)}
-ol.shot li{margin-bottom:3px}
-ol.shot li::marker{color:var(--acc);font-weight:800;font-size:11px}
-ol.shot b{color:var(--fg)}
-
-.bfcard{background:linear-gradient(165deg,rgba(var(--acc-a),.08),transparent 52%),var(--bg2);
-  border-color:rgba(var(--acc-a),.22)}
-.bfbig{font-size:46px;font-weight:800;line-height:1.02;letter-spacing:-.045em;color:var(--acc);margin:2px 0 3px}
-.bfbig span{font-size:18px;font-weight:800;margin-left:2px;letter-spacing:0}
-.bfthumb{width:96px;height:128px;border-radius:10px;border:1px solid var(--line);background:#000;flex:0 0 auto}
+.metric3{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;text-align:center}
+.metric3 > div{background:var(--bg3);border:1px solid var(--line);border-radius:11px;padding:10px 4px}
+.metric3 b{display:block;font-size:22px;font-weight:800;letter-spacing:-.04em;line-height:1.1;margin:4px 0 3px;
+  font-variant-numeric:tabular-nums}
+.metric3 b i{font-size:11px;font-weight:700;font-style:normal;color:var(--dim);margin-left:1px}
+.brow{display:grid;grid-template-columns:1fr auto auto 26px;align-items:center;gap:10px;
+  padding:9px 0;border-bottom:1px solid var(--line)}
+.brow:last-child{border-bottom:none}
+.brow b{font-size:15px;font-weight:800;letter-spacing:-.03em;min-width:3.6em;text-align:right}
+.brow b i{font-size:10px;font-weight:700;font-style:normal;color:var(--dim);margin-left:1px}
+.brow .del{color:var(--dim);font-size:16px;border-radius:8px;padding:4px 0}
+.brow .del:active{background:var(--bg3);color:var(--bad)}
 
 #toast{position:fixed;left:50%;transform:translateX(-50%) translateY(20px) scale(.96);bottom:calc(var(--safe-b) + 92px);
   background:var(--fg);color:#08090c;font-weight:800;font-size:13px;padding:11px 20px;border-radius:999px;
@@ -267,7 +185,3 @@ ol.shot b{color:var(--fg)}
 #app > .card,#app > .seg,#app > h2.sec,#exlist > .card{animation:rise .28s cubic-bezier(.2,.7,.3,1) both}
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}
-
-.spin{width:15px;height:15px;border:2px solid var(--line2);border-top-color:var(--acc);border-radius:50%;
-  display:inline-block;animation:sp .7s linear infinite;vertical-align:-3px}
-@keyframes sp{to{transform:rotate(360deg)}}
