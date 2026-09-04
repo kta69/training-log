@@ -165,8 +165,9 @@ input.exname[data-custom="1"]{color:var(--acc)}
 canvas.chart{width:100%;height:150px;display:block}
 .metric3{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;text-align:center}
 .metric3 > div{background:var(--bg3);border:1px solid var(--line);border-radius:11px;padding:10px 4px}
-.metric3 b{display:block;font-size:22px;font-weight:800;letter-spacing:-.04em;line-height:1.1;margin:4px 0 3px;
-  font-variant-numeric:tabular-nums}
+/* 狭い端末(320px)だと22pxでは枠いっぱいになるので幅に追従させる */
+.metric3 b{display:block;font-size:clamp(18px,6vw,22px);font-weight:800;letter-spacing:-.04em;line-height:1.1;
+  margin:4px 0 3px;font-variant-numeric:tabular-nums}
 .metric3 b i{font-size:11px;font-weight:700;font-style:normal;color:var(--dim);margin-left:1px}
 .brow{display:grid;grid-template-columns:1fr auto auto 26px;align-items:center;gap:10px;
   padding:9px 0;border-bottom:1px solid var(--line)}

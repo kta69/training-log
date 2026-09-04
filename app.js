@@ -138,7 +138,13 @@ function chart(cv, pts, color) {
 
 /* ============ Router ============ */
 const app = () => document.getElementById('app');
-function go(tab) { S.tab = tab; save(); render(); requestAnimationFrame(() => window.scrollTo(0, 0)); }
+/* 描画の前に先頭へ戻す。描画後だと、短いタブに切り替えた瞬間に
+   ブラウザがスクロール位置を詰めるため画面が一度ガクッとズレて見える。 */
+function go(tab) {
+  if (tab === S.tab) return;
+  window.scrollTo(0, 0);
+  S.tab = tab; save(); render();
+}
 
 function render() {
   document.querySelectorAll('#tabbar button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
@@ -157,16 +163,13 @@ function viewWorkout(el) {
   const sess = currentSession(day.id);
   const doneToday = S.sessions.find(s => s.date === d0 && s.day === day.id && s.done);
   document.getElementById('bar-title').textContent = day.name;
-  document.getElementById('bar-right').innerHTML = '';
+  /* 日付は入力欄1つだけなのでカードを1枚使わず、ヘッダーの空きスロットに置く */
+  document.getElementById('bar-right').innerHTML =
+    `<label class="datepick">${d0 === today() ? '今日' : ''}<input type="date" id="logdate" value="${d0}"></label>`;
 
   el.innerHTML = `
     <div class="seg">${PROGRAM.map(d => `<button data-d="${d.id}" class="${d.id === day.id ? 'on' : ''}">${d.name.replace('Day ', 'D')}</button>`).join('')}</div>
-    <div class="card tight">
-      <div class="row" style="justify-content:flex-end">
-        <label class="datepick">${d0 === today() ? '今日' : ''}<input type="date" id="logdate" value="${d0}"></label>
-      </div>
-      <div id="sessbar">${doneToday && !sess ? `<div class="hr"></div><div class="xs ok">✓ ${fmtDate(d0)} の ${day.name} は完了済み（追記すると再開します）</div>` : ''}</div>
-    </div>
+    ${doneToday && !sess ? `<div class="card tight xs ok">✓ ${fmtDate(d0)} の ${day.name} は完了済み（追記すると再開します）</div>` : ''}
     <div id="exlist"></div>
     <div id="finishbar"></div>
   `;
@@ -174,7 +177,7 @@ function viewWorkout(el) {
     const b = e.target.closest('button[data-d]'); if (!b) return;
     S.day = b.dataset.d; save(); render();
   };
-  el.querySelector('#logdate').onchange = e => {
+  document.getElementById('logdate').onchange = e => {
     S.logDate = e.target.value === today() ? null : e.target.value; save(); render();
   };
   if (sess) showFinishBar(day);
@@ -403,7 +406,7 @@ function exCard(main, sess) {
   const others = vs.filter(v => v.id !== it.id);
   const swap = `
     <div class="swap">
-      <span class="swaplbl">切替</span>
+      ${others.length ? '<span class="swaplbl">切替</span>' : ''}
       ${others.map(v => {
         const has = sess && sess.logs[v.id] && sess.logs[v.id].some(s => s.w || s.r);
         return `<button class="vchip" data-pick="${main.id}:${v.id}">${esc(exName(v))}${has ? '<i class="dot"></i>' : ''}</button>`;
